@@ -1,3 +1,385 @@
+# 점심·여행 자동 결정 V8.4.4 — 기능·화면·DB·데이터·개발환경
+
+한국·일본의 지역과 상권을 선택해 점심을 추천하고, 등록된 관광지·음식점·카페·숙박으로 여행 일정을 구성하는 Node.js·MySQL 웹 애플리케이션입니다. V8.4.4에는 관리자 확인을 거쳐 실제 Google Place ID를 연결하는 승인형 동기화 코드가 추가되어 있습니다.
+
+**문서 기준:** 2026-10-19, `main@c830f198c88669c4fa658b27d4bd00aa170e61ee`의 실제 소스·SQL·화면. 아래는 현재 구현 명세이며, 실제 외부 API·MySQL 연결 검증이 필요한 항목과 미구현 기능을 별도로 표시합니다.
+
+- [1. 기능정의서](#1-기능정의서)
+- [2. 화면구성도 및 화면 설계](#2-화면구성도-및-화면-설계)
+- [3. DB 설계](#3-db-설계)
+- [4. 데이터 수집 방법](#4-데이터-수집-방법)
+- [5. 개발 환경](#5-개발-환경)
+
+버전별 상세 안내: [V8.4.2 여행·샘플](README_V8.4.2.md) · [V8.4.3 화면·길찾기](README_V8.4.3.md) · [V8.4.4 승인형 동기화](README_V8.4.4.md)
+
+## 1. 기능정의서
+
+### 1.1 사용자와 권한
+
+| 구분 | 사용 범위 | 인증·저장 기준 |
+| --- | --- | --- |
+| 비회원 | 지역 선택, 점심 추천, 여행 생성, 지도·길찾기 | 회원 전용 이력·조건 저장은 로그인 필요 |
+| 회원 | 비회원 기능 + 조건 저장·방문/거절 이력·집계 | `users` 계정, bcrypt 해시, Express 세션 |
+| 관리자 | 지역·장소 등록, 연결 진단, 동기화 확인·활성화 | `.env`의 `ADMIN_USERNAME`·`ADMIN_PASSWORD`; 별도 관리자 테이블 없음 |
+
+### 1.2 기능 목록
+
+API 주소는 `/api`를 포함한 실제 경로입니다. 표의 “구현”은 소스 존재를 뜻하며 실제 사용자 환경의 통합 성공을 보증하지 않습니다.
+
+| ID | 기능 | 입력·처리·결과 | 주요 API / 소스 | 상태 |
+| --- | --- | --- | --- | --- |
+| F01 | 한국·일본 지역 선택 | 국가→시도→시군구→읍면동→상권, 부모 변경 시 하위 선택 초기화 | `GET /api/context/locations`, [lib/tree.js](lib/tree.js) | 구현; 등록된 지역만 표시 |
+| F02 | 회원가입·로그인 | 아이디·비밀번호·이름 검증, 가입 후 자동 로그인 | `POST /api/user/register`, `POST /api/user/login` | 구현 |
+| F03 | 내 조건 저장 | 상권·예산·인원·선호/비선호 음식·좌표 저장 | `PUT /api/user/preferences` | 회원 전용 구현 |
+| F04 | 오늘 점심 추천 | 활성 음식점을 조회해 점수순으로 1곳과 후보 최대 5곳 반환 | `POST /api/recommendation/today` | 규칙 기반 구현 |
+| F05 | 방문·거절 기록 | 추천 장소에 방문 또는 거절, 거절 이유 저장 | `POST /api/recommendation/feedback` | 회원 전용 구현 |
+| F06 | 이력·선호 집계 | 이력 최대 100건, 행동별·음식분류별·거절사유별 집계 | `GET /api/user/history`, `GET /api/user/learning` | 구현; ML 학습 모델 아님 |
+| F07 | 날씨 조회 | 현재 위치 또는 지역 대표 좌표로 날씨 조회·표시 | `GET /api/context/today` | OpenWeather 키·연결 필요 |
+| F08 | 지도·직접 길찾기 | 선택 장소/주소/좌표 또는 직접 입력한 목적지로 Google 지도 열기 | [public/map-links.js](public/map-links.js) | 구현; 지도 URL 자체는 관리자·API 키 불필요 |
+| F09 | 여행 일정 생성 | 시군구·1~7일 입력, 하루 6단계 배분, 장소 부족 시 재사용 안내 | `POST /api/travel/auto-plan`, [lib/travel-plan.js](lib/travel-plan.js) | 구현; 네 종류 중 하나라도 없으면 HTTP 409 |
+| F10 | 여행 장소 수 조회 | 음식점·카페·관광지·숙박 수량 조회 | `GET /api/travel/summary` | 구현 |
+| F11 | 지역 등록·진단 | 국가부터 상권까지 등록, 부모/FK·비어 있는 상권 확인 | `POST /api/admin/locations`, `GET /api/admin/locations/diagnostics` | 관리자 전용 구현 |
+| F12 | 음식점 등록 | 상권·명칭·분류·가격·주소·메뉴·평점·이미지 경로 등 저장 | `POST /api/admin/restaurants` | 관리자 전용 구현 |
+| F13 | 관광지·카페·숙박 등록 | 상권·종류·명칭·가격·주소·선택 좌표 저장 | `POST /api/admin/places` | 관리자 전용 구현 |
+| F14 | Google 검색 미리보기 | 상권·종류로 검색, 지역 일치 여부와 선택용 토큰 반환 | `POST /api/admin/sync-google-places/preview` | 연결부 보완 필요: 4.4절 |
+| F15 | 동기화 비활성 저장 | 장소별 읍면동·상권 확인, 주소 재검증 후 승인 기록과 신규 장소 저장 | `POST /api/admin/sync-google-places/approve` | 구현 코드 있음; 실 DB/API 점검 필요 |
+| F16 | 동기화 최종 활성화 | 승인 장소 조회 후 선택·재검증, `active=1` 전환 | `GET /api/admin/sync-google-places/pending`, `POST /api/admin/sync-google-places/activate` | 구현 코드 있음; 활성화 후 추천 대상 |
+| F17 | 백업·이관·검증 | 기존/신규 DB 백업, 이관 미리보기·적용, FK 진단 | `backup`, `migrate:plan`, `migrate:apply`, `verify` | CLI 구현 |
+| F18 | 상태 진단 | DB 연결·버전·외부 키 설정·동기화 테이블 준비 여부 확인 | `GET /api/system/check`, `GET /health` | 구현; 키 설정 여부와 실제 유효성은 다름 |
+
+### 1.3 판단 규칙과 구현 한계
+
+- 점심 점수는 DB 평점, 샘플 여부, 최소가격 대비 예산, 선호/비선호 음식, **최근 30일** 방문·거절 기록으로 계산합니다. 예산 초과는 감점 방식이며 절대 제외 조건은 아닙니다.
+- 여행은 실제 등록 장소를 종류별로 나누고, 비샘플을 우선한 뒤 ID 순서로 날짜별 배분합니다. 오전 관광→점심→카페→오후 관광→저녁→숙박을 매일 구성하며 마지막 날도 숙박 단계가 포함됩니다.
+- 날씨·인원·현재 위치를 화면에서 전달하더라도 현재 추천 점수와 여행 배분이 이를 모두 최적화에 사용하는 것은 아닙니다. 영업시간 자동 검증·예약·대중교통 환승 최적화·생성형 AI 여행 설계는 미구현입니다.
+- 여행 저장 테이블은 있지만 현재 자동 생성 API는 일정을 응답으로 반환하며 해당 테이블에 저장하지 않습니다.
+- 이미지 경로 입력은 제공하지만 사진 파일 업로드 API는 없습니다. 지역·장소의 전체 수정/삭제 CRUD도 제공하지 않습니다.
+- 한국·일본 선택과 일본 지명 별칭은 있으나 화면은 한국어이며 추천 카드의 통화 기호는 현재 `₩`로 고정되어 있습니다. 일본어 UI·엔화 표시의 완전한 현지화는 후속 작업입니다.
+
+## 2. 화면구성도 및 화면 설계
+
+### 2.1 화면 구성
+
+사용자 기능은 여러 독립 페이지가 아니라 **하나의 메인 페이지 안의 섹션과 팝업**으로 구성됩니다. 관리자는 별도 페이지의 탭으로 관리합니다.
+
+```mermaid
+flowchart TD
+    U["사용자 메인 /"] --> P["내 정보 · 지역과 조건"]
+    U --> R["오늘의 추천 · 지도"]
+    U --> H["나의 기록"]
+    U --> T["여행 일정"]
+    U --> A["관리자 /admin"]
+    A --> L["로그인"]
+    L --> M["관리자 센터"]
+    M --> G["지역 관리"]
+    M --> F["음식점 등록"]
+    M --> S["실제 데이터 동기화"]
+    M --> V["여행 장소"]
+```
+
+### 2.2 사용자 화면 정의
+
+| 화면 ID | 위치·컴포넌트 | 주요 입력·표시 | 동작·오류 처리 |
+| --- | --- | --- | --- |
+| U01 | `/` 상단·사이드 메뉴 | 게스트/회원 상태, DB 상태, 홈·추천·기록·내 정보·관리자 | 메뉴는 해당 섹션 이동; 관리자 버튼은 선택 팝업 |
+| U02 | 메인 추천 히어로 | 상권·추천 음식점·대표메뉴·다시 결정 | 처리 중 버튼 비활성, 실패하면 재시도 버튼 |
+| U03 | `#profile` 조건 카드 | 국가·시도·시군구·읍면동·상권, 위치, 예산, 인원, 음식 선호 | 상위 선택 변경 시 하위 초기화; 저장은 로그인 필요 |
+| U04 | `#recommendation` | 음식 이미지·명칭·가격·추천 이유, 지도·길찾기, 방문/거절 | 출발지 현재 위치/지역 선택, 직접 목적지 입력, 피드백 기록 |
+| U05 | 날씨·상세 정보 | 날씨·요일·거리·시간·메뉴·주소·전화 | 외부 조회 실패·좌표 누락은 미확인 안내 |
+| U06 | `#history` | 이력 수·방문/거절/추천 기록·선호 집계 | 비회원은 로그인 안내 |
+| U07 | `#travelAI` | DB의 여행 지역·1~7일·출발 기준, 날짜별 6단계·길찾기 | 일정 생성 후 일수 변경 시 재생성; 부족 장소 안내 |
+| U08 | `#authModal` | 로그인/가입 전환, 이름·아이디·암호 | 성공 시 팝업 닫기·회원 상태 및 추천 갱신; 실패 메시지 표시 |
+
+국가 선택 예시는 대한민국 또는 일본이며, 일본 샘플 경로는 **일본→도쿄도→신주쿠구→니시신주쿠→신주쿠상권**입니다. 여행 지역 목록은 실행 중 DB 조회 결과로 채워집니다. HTML의 초기 도시 목록만으로 전국·일본 전체 데이터가 준비되었다고 판단하지 않습니다.
+
+### 2.3 관리자 화면 정의
+
+| 화면 ID | 경로·탭 | 구성 | 처리 후 상태 |
+| --- | --- | --- | --- |
+| A01 | `/admin` 로그인 | 관리자 아이디·암호·오류 메시지 | 성공 시 관리자 센터와 통계 표시 |
+| A02 | 지역 관리 | 국가→시도→시군구→읍면동→선택 법정동/리→상권, 새 지역 등록·연결 검사 | 현재 탭에서 목록·경로·검사 결과 갱신 |
+| A03 | 음식점 등록 | 지역 선택, 이름·분류·가격·주소·메뉴·평점·이미지 경로·시간 | 현재 탭에 성공/실패 표시, 목록 갱신 |
+| A04 | 실제 데이터 동기화 | 지역·장소 종류, 미리보기 표, 장소 선택·읍면동/상권 체크, 승인 목록 | 비활성 저장 후 승인 목록 갱신; 최종 활성화 별도 |
+| A05 | 여행 장소 | 지역·관광/카페/숙박/음식점 종류·가격·주소 등 | 현재 탭에서 저장 결과·목록 갱신 |
+
+**현재 동작:** 관리자 저장 후 무조건 사용자 메인으로 돌아가는 공통 처리는 없습니다. 각 관리자 탭에 남아 결과를 갱신하며, 상단 “사용자 화면” 버튼으로 `/`에 이동합니다.
+
+화면 원본: [public/index.html](public/index.html) · [public/script.js](public/script.js) · [public/style.css](public/style.css) · [public/admin.html](public/admin.html)
+
+## 3. DB 설계
+
+### 3.1 DB 구성과 설계 원칙
+
+- 현재 작업 DB: `lunch_decision_v83`, InnoDB·`utf8mb4`. V8.4.4로 프로그램을 올려도 DB 이름은 유지합니다.
+- 기존 원본: `OLD_DB_NAME`, 기본 `lunch_decision`. 신규 DB와 이름이 같으면 연결 모듈에서 차단합니다.
+- 기본 13개 테이블 + `migration_mappings` + `google_sync_reviews` = **15개 테이블**, 조회용 뷰 `v_place_full_path` 1개입니다.
+- 사용자·관리자 선택 목록의 가상 ID와 DB PK는 구분합니다. `lib/tree.js`에서 표시용 ID를 만들고 등록 API에서 실제 PK로 변환합니다.
+- 관리자 인증은 환경변수, 세션과 동기화 미리보기 토큰은 서버 메모리를 사용합니다. `admins`·세션·미리보기 전용 DB 테이블은 없습니다.
+
+### 3.2 테이블 정의와 PK/FK
+
+`id`를 PK로 쓰는 일반 엔티티는 `BIGINT UNSIGNED AUTO_INCREMENT`입니다. 예외인 복합키·공유키는 표에 명시했습니다.
+
+| 테이블 | 역할·핵심 컬럼 | PK | FK |
+| --- | --- | --- | --- |
+| `countries` | 국가: `code VARCHAR(8)`, `name VARCHAR(100)`, `currency CHAR(3)`, 활성 여부 | `id` | 없음 |
+| `provinces` | 시도·도도부현: `code VARCHAR(48)`, `name VARCHAR(150)` | `id` | `country_id → countries.id` |
+| `districts` | 시군구·일본 하위 지역, 코드·명칭·활성 여부 | `id` | `province_id → provinces.id` |
+| `admin_towns` | 읍면동·일본 하위 지역, `kind ENUM(eup,myeon,dong,other)` | `id` | `district_id → districts.id` |
+| `legal_units` | 법정동·리, `kind ENUM(legal_dong,ri,other)` | `id` | `district_id → districts.id` |
+| `town_legal_links` | 행정동과 법정동/리의 다대다 연결 | `(town_id,legal_unit_id)` | `(district_id,town_id) → admin_towns(district_id,id)`, `(district_id,legal_unit_id) → legal_units(district_id,id)` |
+| `commercial_areas` | 상권, `code`·`name`·`active`·`is_demo` | `id` | `town_id → admin_towns.id`, `(town_id,legal_unit_id) → town_legal_links`; 법정단위 선택 |
+| `places` | 음식점·카페·관광지·숙박 통합, 가격·주소·좌표·Google ID | `id` | `area_id → commercial_areas.id` |
+| `users` | 회원: `username VARCHAR(80)`, `password_hash VARCHAR(255)`, 표시 이름 | `id` | 없음 |
+| `user_preferences` | 회원별 예산·인원·선호 음식·지역·현재 위치 | `user_id`, `BIGINT UNSIGNED` | `user_id → users.id`, `preferred_town_id → admin_towns.id`, `(preferred_town_id,preferred_area_id) → commercial_areas(town_id,id)` |
+| `lunch_history` | 추천·방문·거절·수락, 방문일·거절사유·메모·점수 | `id` | `user_id → users.id`, `place_id → places.id` |
+| `itineraries` | 여행 저장용 헤더: `start_date DATE`, `days TINYINT UNSIGNED` | `id` | `user_id → users.id` |
+| `itinerary_items` | 여행 저장용 날짜·순서·예정시각·이동시간 | `id` | `itinerary_id → itineraries.id`, `place_id → places.id` |
+| `migration_mappings` | 구버전 테이블·ID와 신규 테이블·ID 대응 | `(legacy_table,legacy_id)` | 물리 FK 없음; 원본/신규 별도 DB 대응표 |
+| `google_sync_reviews` | 장소당 현재 승인 정보, 확인 관리자·읍면동/상권 확인·활성일 | `place_id`, `BIGINT UNSIGNED` | `place_id → places.id`, `area_id → commercial_areas.id` |
+
+`google_sync_reviews`는 장소마다 한 행을 두고 재승인 때 갱신합니다. 승인 작업 전체를 누적 보관하는 감사 로그 테이블은 아닙니다.
+
+### 3.3 주요 컬럼과 제약
+
+| 대상 | 물리 정의·제약 |
+| --- | --- |
+| 장소 종류 | `places.place_type ENUM('restaurant','cafe','attraction','lodging')` |
+| 장소 명칭·주소 | `name VARCHAR(180) NOT NULL`, `address VARCHAR(255) NULL` |
+| 좌표·가격 | `latitude/longitude DECIMAL(10,7)`, `price_min/price_max INT UNSIGNED`; 최고가격≥최저가격 CHECK |
+| 장소 중복 | `UNIQUE(area_id,name,place_type)`, `UNIQUE(google_place_id)` |
+| V8.4 장소 확장 | `main_menu`·`description`·`phone`·`image_path`·`rating DECIMAL(3,1)`·`review_count`·`lunch_start/lunch_end TIME`·`open_days` |
+| 회원·선호 | 아이디 UNIQUE; 회원별 선호 PK로 1:0..1; 선호 상권과 읍면동은 복합 FK로 연결 |
+| 행동 이력 | `action ENUM('recommended','visited','rejected','accepted')`; `visit_date DATE`, `decision_score DECIMAL(8,2)` 등 |
+| 여행 순서 | `UNIQUE(itinerary_id,day_no,sequence_no)`; 현재 생성 API의 저장 연동은 미구현 |
+| Google 승인 | `reviewed_by VARCHAR(80)`, 주소 검증·읍면동/상권 확인 BOOLEAN, `approved_at/activated_at DATETIME` |
+| 삭제 규칙 | 지역·장소 참조는 주로 RESTRICT; 회원 삭제의 조건·이력·여행, 여행 삭제의 항목은 CASCADE |
+
+### 3.4 ERD
+
+지역·장소 관계:
+
+```mermaid
+erDiagram
+    direction TB
+    countries ||--o{ provinces : country_id
+    provinces ||--o{ districts : province_id
+    districts ||--o{ admin_towns : district_id
+    districts ||--o{ legal_units : district_id
+    admin_towns ||--o{ town_legal_links : town_id
+    legal_units ||--o{ town_legal_links : legal_unit_id
+    admin_towns ||--o{ commercial_areas : town_id
+    town_legal_links |o--o{ commercial_areas : optional_legal_link
+    commercial_areas ||--o{ places : area_id
+```
+
+회원·이력·여행·승인 관계:
+
+```mermaid
+erDiagram
+    direction TB
+    users ||--o| user_preferences : user_id
+    users ||--o{ lunch_history : user_id
+    places ||--o{ lunch_history : place_id
+    users ||--o{ itineraries : user_id
+    itineraries ||--o{ itinerary_items : itinerary_id
+    places ||--o{ itinerary_items : place_id
+    places ||--o| google_sync_reviews : place_id
+    commercial_areas ||--o{ google_sync_reviews : area_id
+```
+
+회원 선호의 선택 지역 FK와 복합 FK의 상세 정의는 위 표와 SQL을 기준으로 합니다. `migration_mappings`는 물리 FK가 없는 별도 대응표여서 ERD의 연결선에서 제외했습니다.
+
+정의 원본: [기본 스키마](sql/01_schema.sql) · [V8.4 확장 참고 SQL](sql/02_v84_extensions.sql) · [V8.4.4 승인 테이블](sql/03_v844_google_sync.sql) · [설치 스크립트](scripts/setup.js) · [기존 상세 ERD](ERD-V8.3.md)
+
+`sql/02_v84_extensions.sql`는 참고 정의입니다. 기존 컬럼을 확인하는 `npm run setup` 경로를 사용하며, 기존 운영 DB에 SQL 파일을 직접 재실행하지 않습니다.
+
+## 4. 데이터 수집 방법
+
+### 4.1 데이터별 출처·수집·저장
+
+| 데이터 | 수집 경로 | 저장·이용 | 현재 범위 |
+| --- | --- | --- | --- |
+| 국가·행정구역·상권 | 관리자 수동 입력, 기존 DB 이관, 샘플 seed | 지역 테이블과 FK 관계 | 전국 법정동·일본 47개 도도부현 전체를 자동 수집하는 모듈은 없음 |
+| 기존 회원·지역·장소·이력 | `migrate:plan`으로 대응 관계 확인 후 `migrate:apply` | 원본 읽기, 신규 DB 트랜잭션, ID 대응표 | 불명확한 연결은 보류·보고; 다른 지역에 추측 연결하지 않음 |
+| 관리자 등록 장소 | 음식점/여행 장소 폼 | 입력한 명칭·주소·가격·선택 좌표 등 `places` | 자료 정확도는 등록자가 확인 |
+| Google 장소 | Places API (New) Text Search + Place Details | Place ID·승인한 지역 FK·내부 식별 명칭·승인 정보 저장 | 미리보기 연결 보완 필요; 4.4절 |
+| 날씨 | OpenWeather Current Weather | 요청 시 화면에 표시, 별도 날씨 테이블 없음 | 키 필요; 현재 위치 또는 코드에 정의된 대표 좌표 |
+| 이동시간·거리 | OSRM Route API | 여행 응답의 분·km에 반영, 현재 일정 DB에 자동 저장하지 않음 | 실제 좌표가 확인된 비샘플 구간만 계산 |
+| 추천·방문·거절 | 사용자 요청·행동 | 회원의 `lunch_history` | 비회원 행동을 DB에 영구 저장하는 기능 없음 |
+| 시연 장소 | `seed:demo`, `seed:travel` | `is_demo=1`로 구분 | 가상 자료, 실제 영업·가격·주소·좌표 보증 없음 |
+
+`seed:demo`는 [기본 6개 지역 경로](scripts/seed-demo.js)와 통합 시연 장소를 준비하고, [여행 샘플 스크립트](scripts/seed-travel-50.js)로 종로구에 **음식점·카페·숙박·관광지 각각 14곳, 합계 56곳을 추가**합니다. 56은 DB 전체 장소 수가 아닙니다. 스크립트 파일명의 `50`은 기존 명칭이며 실제 추가 대상은 56곳입니다.
+
+### 4.2 승인형 Google Places 수집 흐름
+
+아래는 API·DB 코드에 정의된 처리 흐름입니다. 미리보기 진입부의 알려진 문제는 4.4절과 함께 확인하세요.
+
+| 단계 | 처리 | DB 상태·통제 |
+| --- | --- | --- |
+| 1. 지역 선택 | 활성 국가→시도→시군구→읍면동→상권 및 장소 종류 확인 | 실제 상권 PK로 경로 조회 |
+| 2. 미리보기 | `POST /api/admin/sync-google-places/preview` | DB 저장 없음; 검색은 최대 12개 |
+| 3. 주소 확인 | Google 국가 코드·시도·시군구 비교, 다른 등록 읍면동 감지 | 불일치·확인 불가는 승인 차단; 상권 지리 경계를 자동 확정하지 않음 |
+| 4. 사람 확인 | 선택 장소마다 `confirmTown=true`, `confirmArea=true` | 두 확인이 모두 있어야 승인; 좌표로 지역 소속을 판단하지 않음 |
+| 5. 비활성 저장 | `POST /api/admin/sync-google-places/approve`, Details 재검증 | 신규 `places.active=0` + `google_sync_reviews`; 오류 시 전체 저장 롤백 |
+| 6. 승인 장소 조회 | `GET /api/admin/sync-google-places/pending?area_id=N` | 같은 상권의 승인 정보·활성 상태 조회 |
+| 7. 최종 활성화 | `POST /api/admin/sync-google-places/activate`, 주소 다시 확인 | `confirmation="ACTIVATE"`와 장소 DB ID 필요; 트랜잭션으로 `active=1` |
+| 8. 추천·여행 이용 | 활성 장소 조회, 필요 시 최신 이름·주소·좌표 조회 | 신규 미활성 장소는 제외; 최신 정보 조회 실패는 미확인 안내 |
+
+미리보기 토큰은 같은 세션·상권에 묶이며 **10분** 후 만료됩니다. 서버 메모리에는 토큰·허용 Place ID·지역 경로 지문을 유지하고, 저장 후 토큰을 제거합니다. 서버 재시작 시 다시 미리보기를 해야 합니다.
+
+Google Place ID가 다른 상권/장소 종류에 이미 연결되어 있으면 임의 이전·중복 저장을 차단합니다. 같은 상권·종류의 기존 장소는 재사용하며, **이미 활성 상태인 기존 장소를 재승인한다고 다시 비활성으로 바꾸지는 않습니다.**
+
+### 4.3 API 명세·데이터 보관
+
+| 서비스 | 현재 코드의 요청 | 응답 사용 |
+| --- | --- | --- |
+| Google Text Search (New) | `POST https://places.googleapis.com/v1/places:searchText`, `X-Goog-Api-Key`·`X-Goog-FieldMask`, `textQuery/pageSize/languageCode/regionCode` | `places.id/displayName/formattedAddress/addressComponents/types` |
+| Google Place Details (New) | `GET https://places.googleapis.com/v1/places/{PLACE_ID}`, FieldMask 지정 | `id/displayName/formattedAddress/addressComponents/location` |
+| OpenWeather | `GET https://api.openweathermap.org/data/2.5/weather`, `lat/lon/appid/units=metric/lang=kr` | 온도·날씨 설명·관측 시각 |
+| OSRM | `GET https://router.project-osrm.org/route/v1/driving/{lon,lat;lon,lat}?overview=false` | 응답의 초→분, m→km 변환; 실패는 미확인 |
+
+Google에서 가져오는 이름·주소·좌표는 승인형 수집 경로에서 장기 DB에 복제하지 않고 최신 조회 결과로 표시합니다. DB의 `places.name`에는 `Google 연동 장소 {ID 일부}`라는 내부 식별용 문자열을 사용합니다. 별도 관리자 수동 등록 필드와 이 수집 경로는 구분해야 합니다.
+
+현재 Google 요청 FieldMask에는 가격·평점·리뷰 수·영업시간·사진이 없습니다. 해당 정보가 자동 수집·검증된 것으로 안내하지 않습니다. 이름·주소의 화면 표시와 별개로 장소 종류는 관리자 선택값으로 저장되므로 실제 업종도 사람이 확인해야 합니다.
+
+Google 공식 정책은 Place ID 저장 예외와 표시·출처 표기 조건을 규정합니다. 현재 코드가 모든 표시 조건을 충족한다고 단정하지 않으며, 실제 공개 전 적용 화면별로 공식 정책을 확인합니다. 검색·Details 재조회에는 설정과 요청 필드에 따른 API 비용이 발생할 수 있습니다.
+
+공식 자료 확인일: 2026-10-19.
+
+- [Google Text Search (New)](https://developers.google.com/maps/documentation/places/web-service/text-search)
+- [Google Place Details (New)](https://developers.google.com/maps/documentation/places/web-service/place-details)
+- [Google Places 저장·표시 정책](https://developers.google.com/maps/documentation/places/web-service/policies)
+- [Google Place ID 안내](https://developers.google.com/maps/documentation/places/web-service/place-id)
+- [OpenWeather 현재 날씨](https://openweathermap.org/api/current)
+- [OSRM API 문서](https://project-osrm.org/docs/v5.24.0/api/)
+
+### 4.4 소스 검토에서 확인한 보완 사항
+
+**동기화 미리보기의 인자 구조 불일치가 있습니다.**
+
+[routes/api.js](routes/api.js)는 `sync.textSearch({path,siblings},type)`을 호출하지만, [lib/google-sync.js](lib/google-sync.js)의 `textSearch`는 인자의 최상위에서 `country_code`·지역 이름을 읽습니다. 이 때문에 지역 정보가 들어 있는 `path`를 제대로 읽지 못합니다.
+
+일본·도쿄·신주쿠 샘플을 전달하고 네트워크 요청을 모의 처리해 확인한 요청 본문은 다음과 같습니다.
+
+```json
+{
+  "textQuery": "     음식점",
+  "pageSize": 12,
+  "languageCode": "ko",
+  "regionCode": "UNDEFINED"
+}
+```
+
+이는 실제 Google 유료 호출 결과가 아니라 **현재 함수 연결로 만들어지는 요청의 재현 결과**입니다. 올바른 지역별 검색을 위해 전달 구조를 통일하고, 일본은 `JP/ja`, 한국은 `KR/ko` 및 선택 지역명이 생성되는지 확인해야 합니다. 기존 순수 테스트 통과만으로 이 진입부의 실 API 성공을 판단할 수 없습니다. 이번 변경은 README 작성이며 구현 코드는 수정하지 않았습니다.
+
+## 5. 개발 환경
+
+### 5.1 기술 구성
+
+| 항목 | 현재 구성 |
+| --- | --- |
+| 개발·실행 기준 | Windows 11/10 + PowerShell; VS Code 등 편집기 사용 가능 |
+| 서버 | Node.js, `package.json` 요구값 `>=18.18.0`; 실제 운영에는 지원 중인 LTS 사용 |
+| 웹 프레임워크 | Express `^5.1.0` |
+| DB | MySQL 8.x, InnoDB, `utf8mb4`, mysql2 `^3.14.4` |
+| 화면 | HTML·CSS·브라우저 JavaScript; 별도 프런트엔드 빌드 단계 없음 |
+| 환경설정·인증 | dotenv `^16.4.7`, bcryptjs `^2.4.3`, express-session `^1.18.2` |
+| 외부 연결 | Node 내장 `fetch`, Google Places (New), OpenWeather, OSRM, Google 지도 URL |
+| 기본 접속 | `http://127.0.0.1:3100/`, 관리자 `/admin`; `PORT` 변경 가능 |
+| 기본 바인딩 | `127.0.0.1`에만 수신하므로 현재 설정 그대로는 다른 PC·휴대폰에서 접속 불가 |
+
+의존성 값은 설치 결과가 아니라 [package.json](package.json)의 선언 범위입니다. 실제 고정 버전은 [package-lock.json](package-lock.json)을 따릅니다. 세션은 기본 메모리 저장소와 4시간 쿠키를 사용하며, 다중 서버용 세션 공유 구성은 없습니다.
+
+### 5.2 폴더와 역할
+
+| 경로 | 역할 |
+| --- | --- |
+| [server.js](server.js) | 정적 파일·API·관리자 경로·세션·오류 응답·서버 시작 |
+| [routes/api.js](routes/api.js) | 회원·지역·장소·추천·여행·동기화 API |
+| [db.js](db.js) | MySQL 풀, 원본/신규 DB 분리·이름 검증 |
+| [lib/tree.js](lib/tree.js), [lib/travel-plan.js](lib/travel-plan.js) | 지역 선택 어댑터·여행 배분 |
+| [lib/google-sync.js](lib/google-sync.js), [lib/route.js](lib/route.js) | Google 조회·주소 확인·임시 토큰, OSRM 조회 |
+| `public/` | 사용자·관리자 HTML, 스크립트·스타일·이미지 |
+| `sql/`, `scripts/` | 스키마·샘플·백업·이관·설치·진단 |
+| `tests/` | Node 순수 로직·소스 연결 회귀 검사 |
+| `backups/`, `diagnostics/` | 실행 시 생성하는 백업·검사 보고서 |
+
+### 5.3 환경변수
+
+[.env.example](.env.example)을 복사하되 기존 `.env`는 덮어쓰지 않습니다.
+
+| 변수 | 기본/예시 | 용도 |
+| --- | --- | --- |
+| `PORT` | `3100` | HTTP 포트 |
+| `DB_HOST / DB_PORT` | `127.0.0.1 / 3306` | MySQL 접속 |
+| `DB_USER / DB_PASSWORD` | 본인 DB 계정·암호 | DB 인증 |
+| `OLD_DB_NAME` | `lunch_decision` | 이전 DB 읽기·백업·이관 원본 |
+| `V83_DB_NAME` | `lunch_decision_v83` | 현재 작업 DB |
+| `SESSION_SECRET` | 충분히 긴 임의값 | 세션 서명 |
+| `ADMIN_USERNAME / ADMIN_PASSWORD` | 본인 관리자 계정 | 관리자 인증; 예시 암호 변경 필수 |
+| `OPENWEATHER_API_KEY` | 본인 키 또는 빈값 | 날씨 조회 |
+| `GOOGLE_MAPS_API_KEY` | 본인 키 또는 빈값 | Places 검색·Details; 지도 URL 열기와는 별개 |
+
+### 5.4 설치·업그레이드
+
+GitHub에서 받은 경우 실제 실행 폴더는 저장소 안의 동명 폴더입니다.
+
+```powershell
+git clone https://github.com/choisunghwan1004-dev/lunch-decision-v8.4.4-approved-sync.git
+cd lunch-decision-v8.4.4-approved-sync\lunch-decision-v8.4.4-approved-sync
+npm ci
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+notepad .env
+```
+
+**기존 V8.4.3 DB를 사용 중인 업그레이드:**
+
+```powershell
+npm run backup
+npm run setup:sync
+npm run test:ui
+npm start
+```
+
+기존 데이터 이관이 끝났다면 `setup`·`migrate:apply`·샘플 등록을 다시 수행할 필요가 없습니다.
+
+**DB가 없는 신규 시연 환경:**
+
+```powershell
+npm run setup
+npm run setup:sync
+npm run seed:demo
+npm run verify
+npm run verify:travel
+npm start
+```
+
+`setup`은 현재 `V83_DB_NAME=lunch_decision_v83`만 자동 생성하도록 제한합니다. 기존 데이터가 있다면 먼저 백업·이관 계획을 확인하세요. `backup`은 `OLD_DB_NAME` 연결 실패 시 중단하므로, 원본 DB가 전혀 없는 신규 설치와 기존 데이터가 있는 업그레이드를 구분합니다.
+
+### 5.5 검증과 확인 지점
+
+| 명령·주소 | 확인 내용 |
+| --- | --- |
+| `npm run doctor` | 설정 포트·DB 연결 진단 |
+| `npm run check` | 주요 서버 스크립트 문법 |
+| `npm run test:ui` | 지역·지도·여행·동기화 순수 규칙/소스 검사 |
+| `npm run test:map` / `npm run test:sync` | 지도·동기화 규칙 개별 검사 |
+| `npm run verify` / `npm run verify:travel` | 실제 DB FK·지역·여행 샘플 연결 |
+| `npm run test:api` | 실제 HTTP·DB 및 1/2/3일 일정; 필요 시 임시 서버 자동 시작 |
+| `GET /api/system/check` | `version=V8.4.4`, `sync.schemaReady`, `sync.enabled` 등 |
+
+이번 문서 작성 시 기존 `node --test tests/*.test.js`는 **29개 통과·실패 0개**였습니다. 실제 MySQL 연결, 유료 Google 호출, 실제 브라우저 클릭은 이번 검증에 포함하지 않았습니다. Google 미리보기의 모의 요청 검사는 4.4절에 따로 기록했습니다.
+
+브라우저 확인: ① 한국/일본→지역→점심 추천·지도·여행 일수별 6단계 표시, ② 관리자의 지역/음식점 등록과 성공 메시지·목록 갱신을 확인합니다. 동기화 실연동은 4.4절의 연결 문제를 보완한 뒤 미리보기→비활성 저장→최종 활성화를 확인합니다.
+
+---
+
+<details>
+<summary>기존 설치·이관·뉴스 확장 작업 안내 펼치기</summary>
+
+아래는 설계 항목 추가 직전 README의 안내를 보존한 것입니다. 별도 뉴스 브랜치와 사용자 PC 실행 보고는 현재 저장소의 구현·이번 검증 결과와 구분합니다.
+
 # 점심 선택 시스템 · 점심/여행 자동 결정 V8.4.4
 
 한국·일본의 지역과 상권을 선택하고, 등록된 음식점·관광지·카페·숙박으로 점심과 여행 일정을 구성하는 Node.js / Express / MySQL 시스템입니다.
@@ -311,3 +693,5 @@ npm run test:api
 | [README_V8.4.3.md](README_V8.4.3.md), [README_V8.4.2.md](README_V8.4.2.md) | 지도·여행 개선 이력 |
 
 기존 버전 문서의 과거 테스트 기록은 이번 환경의 실행 결과로 간주하지 않습니다.
+
+</details>
