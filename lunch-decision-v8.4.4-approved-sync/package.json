@@ -12,7 +12,7 @@
     "verify": "node scripts/verify.js",
     "test:ui": "node --test tests/*.test.js",
     "start": "node server.js",
-    "check": "node --check server.js && node --check routes/api.js && node --check scripts/migrate.js && node --check scripts/backup.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check scripts/migrate.js && node --check scripts/backup.js && node --check routes/news-proxy.js && node --check public/news-admin.js && node --check public/news-public.js",
     "seed:base": "node scripts/seed-demo.js",
     "test:api": "node scripts/test-api.js",
     "doctor": "node scripts/doctor.js",
@@ -20,7 +20,11 @@
     "verify:travel": "node scripts/verify-travel.js",
     "test:map": "node --test tests/map-v843.test.js",
     "setup:sync": "node scripts/setup-google-sync.js",
-    "test:sync": "node --test tests/sync-v844.test.js"
+    "test:sync": "node --test tests/sync-v844.test.js",
+    "news:setup": "python -m news_service.setup --init-env",
+    "news:run": "python -m uvicorn news_service.app:app --host 127.0.0.1 --port 8001",
+    "news:test": "python -m pytest tests/news -q",
+    "test:news-proxy": "node --test tests/news-proxy.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

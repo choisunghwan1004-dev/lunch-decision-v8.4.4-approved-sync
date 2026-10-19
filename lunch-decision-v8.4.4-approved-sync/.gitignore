@@ -3,3 +3,10 @@ node_modules/
 backups/*
 !backups/.gitkeep
 diagnostics/*.json
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.sqlite3
+test-results/
+

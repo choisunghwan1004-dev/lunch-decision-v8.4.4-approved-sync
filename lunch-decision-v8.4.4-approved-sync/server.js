@@ -5,6 +5,7 @@ app.disable('x-powered-by');
 app.use(express.json({limit:'300kb'}));app.use(express.urlencoded({extended:false}));
 app.use(session({secret:process.env.SESSION_SECRET||'LOCAL_ONLY_CHANGE_ME',resave:false,saveUninitialized:false,cookie:{httpOnly:true,sameSite:'lax',maxAge:4*60*60*1000}}));
 app.use(express.static(path.join(__dirname,'public')));
+app.use('/api/news',require('./routes/news-proxy')());
 app.use('/api',api);
 app.get('/admin',(req,res)=>res.sendFile(path.join(__dirname,'public/admin.html')));
 app.get('/health',async(req,res)=>{try{await require('./db').query('SELECT 1');res.json({ok:true,version:'V8.4.4'})}catch(e){res.status(503).json({ok:false,message:e.message})}});
@@ -19,3 +20,4 @@ server.on('error',error=>{console.error(`[SERVER] 포트 ${port} 실행 실패 (
  if(error.code==='EADDRINUSE')console.error('같은 PORT를 사용 중인 다른 서버를 종료하거나 .env의 PORT를 변경하세요.');
  process.exitCode=1;});
 module.exports=app;
+
