@@ -1,3 +1,6 @@
+/**
+ * 기본 시연 지역의 국가부터 상권·장소까지 FK 연결을 실제 DB에서 따라가며 검사합니다.
+ */
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const db=require('../db');const geo=require('../lib/geo');const {DEMOS}=require('./seed-demo');
 (async()=>{

@@ -1,3 +1,7 @@
+/**
+ * 하루 6단계 여행 흐름을 확인할 수 있도록 명확한 테스트 이름의 장소를 추가합니다.
+ * 이 파일을 실행하면 운영 설정의 DB에 시연 행이 저장되므로 목적을 확인한 뒤 실행합니다.
+ */
 // Add optional clearly labeled fictional places to demonstrate all six travel slots.
 const db=require('../db');
 const samples=[

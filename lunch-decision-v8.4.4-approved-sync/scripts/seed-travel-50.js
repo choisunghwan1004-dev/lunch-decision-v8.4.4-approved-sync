@@ -1,3 +1,7 @@
+/**
+ * 파일명의 50은 기존 이름입니다. 실제로는 종류별 14개, 총 56개 여행 시연 장소를 준비합니다.
+ * 등록된 같은 시연 명칭은 재사용하며 실제 좌표·영업시간을 임의로 만들지 않습니다.
+ */
 // V8.4.2: demo-only, idempotent 56 places for complete 1–3 day testing.
 // No invented real-business coordinates or claim of verified opening times.
 const db=require('../db');

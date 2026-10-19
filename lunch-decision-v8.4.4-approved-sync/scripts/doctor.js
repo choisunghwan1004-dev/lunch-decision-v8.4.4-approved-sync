@@ -1,3 +1,7 @@
+/**
+ * 개발 환경의 포트·서버·DB 연결 상태를 점검하는 진단용 CLI입니다.
+ * 오류가 나오면 설정과 실행 프로세스를 구분해 확인하고 기존 서버를 임의로 종료하지 마세요.
+ */
 // V8.4.1 — Non-destructive startup diagnosis. Never prints passwords or API keys.
 require('dotenv').config();
 const fs = require('node:fs'), path = require('node:path');

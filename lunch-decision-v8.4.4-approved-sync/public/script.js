@@ -1,3 +1,8 @@
+/**
+ * 사용자 메인 화면의 상태와 이벤트입니다. 서버 데이터는 fetch로 받고 DOM에 표시합니다.
+ * 읽는 순서: 지역 목록 → 회원 조건 → 점심 결정 → 방문/거절 이력 → 지도 링크 → 여행 일정.
+ * 화면용 가상 지역 ID와 API/DB에 전달하는 실제 ID(legacy_city_id 등)를 혼동하지 마세요.
+ */
 const $ = id => document.getElementById(id);
 let currentWinner = null;
 let loggedIn = false;
@@ -8,10 +13,14 @@ let currentTripPlan = [];
 let tripHasRun = false;
 const demoImages={main:'/assets/dish-seolleongtang.png',noodles:'/assets/dish-noodles.png',sushi:'/assets/dish-sushi.png',bibimbap:'/assets/dish-bibimbap.png'};
 let LOCATION_DATA=[];
+// 선택 부모와 단계에 해당하는 옵션만 반환합니다.
 function locationChildren(parentId, level){return LOCATION_DATA.filter(x=>String(x.parent_id)===String(parentId)&&x.level===level&&x.active!==0);}
+// 옵션을 채우고 선택할 데이터가 없을 때만 컨트롤을 잠급니다.
 function fillLocationSelect(id, rows, placeholder){const el=$(id);if(!el)return;el.innerHTML=`<option value="">${placeholder}</option>`+rows.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');el.disabled=rows.length===0;}
+// 부모 지역이 바뀌면 예전 자식 선택을 비워 서로 다른 지역 조합을 막습니다.
 function resetLocationSelects(ids){ids.forEach(id=>{const el=$(id);if(el){el.innerHTML='<option value="">먼저 상위 지역을 선택하세요</option>';el.disabled=true;}});}
 function selectedLocationId(){for(const id of ['areaId','townId','districtId','provinceId','countryId']){const el=$(id);if(el&&el.value)return Number(el.value);}return null;}
+// 선택한 가상 지역에서 실제 시군구·상권 PK를 찾아 숨은 입력/데이터 속성에 반영합니다.
 function applyLocationSelection(){
   const area=$(('areaId')); const town=$(('townId')); const townRow=LOCATION_DATA.find(x=>String(x.id)===String(town?.value));
   const areaRow=LOCATION_DATA.find(x=>String(x.id)===String(area?.value));
@@ -19,6 +28,7 @@ function applyLocationSelection(){
   if($('cityId'))$('cityId').value=cityId;
   if($('areaId')){if(areaRow?.legacy_area_id)$('areaId').dataset.legacyAreaId=areaRow.legacy_area_id;else delete $('areaId').dataset.legacyAreaId;}
 }
+// 서버의 공통 지역 목록을 읽고 단계별 change 이벤트 및 저장된 선택을 복원합니다.
 async function loadLocations(){
   try{
     const locationResponse=await fetch('/api/context/locations',{cache:'no-store'});
@@ -62,6 +72,7 @@ function money(n){return Number(n||0).toLocaleString('ko-KR');}
 function setText(id,v){const e=$(id);if(e)e.textContent=v??'-';}
 function imageForRestaurant(r,index=0){if(r.image_path)return r.image_path;if(index===0||/국밥|설렁탕|탕/.test(r.category||''))return demoImages.main;if(/면|칼국수|우동|라멘/.test(r.category||''))return demoImages.noodles;if(/초밥|스시/.test(r.category||''))return demoImages.sushi;return demoImages.bibimbap;}
 
+// 로그인 여부와 저장된 취향·예산을 읽어 기존 화면 상태에 반영합니다.
 async function loadMe(){
   try{
     const r=await fetch('/api/user/me',{cache:'no-store'}); const d=await r.json();
@@ -79,14 +90,18 @@ async function loadMe(){
 function showAuthMessage(message,type='info'){const el=$('authMessage');if(!el)return;el.className=`auth-message ${type}`;el.textContent=message;el.classList.remove('hidden');}
 function clearAuthMessage(){const el=$('authMessage');if(el){el.textContent='';el.className='auth-message hidden';}}
 function showToast(message,type='success'){let el=$('v7Toast');if(!el){el=document.createElement('div');el.id='v7Toast';el.className='v7-toast';document.body.appendChild(el);}el.className=`v7-toast ${type}`;el.textContent=message;clearTimeout(window.__v7ToastTimer);window.__v7ToastTimer=setTimeout(()=>el.classList.add('hide'),2800);}
+// DB 연결과 외부 키 설정 여부를 표시합니다. 실제 외부 API 성공을 보증하는 검사는 아닙니다.
 async function checkSystem(){const el=$('systemStatus');if(!el)return;el.className='system-status checking';el.textContent='● 연결 확인 중';try{const r=await fetch('/api/system/check',{cache:'no-store'});const d=await r.json();if(d.ok){const ext=d.external.openweatherConfigured?'날씨 OK':'날씨키 없음';el.className='system-status ok';el.textContent=`● DB 연결됨 · ${ext}`;}else{el.className='system-status warn';el.textContent=d.database?'● 일부 설정 확인 필요':'● MySQL 연결 확인 필요';}return d;}catch(e){el.className='system-status error';el.textContent='● 서버 연결 실패';return null;}}
 
+// 추천 결과와 이유·가격·주소·지도 링크를 기존 카드에 표시합니다.
 function renderWinner(w,reasons,candidates){currentWinner=w;setText('heroArea',w.area_name||'오늘의 지역');setText('heroRestaurant',w.name);setText('heroMenu',w.main_menu||`${w.category||'오늘의 메뉴'} 한 끼`);$('result').innerHTML=`<div class="food-visual"><img src="${imageForRestaurant(w)}" alt="${w.name} 대표 음식"><div class="food-info"><span class="category-tag">${w.category||'맛집'}</span><h2>${w.name}</h2><p>${w.description||'오늘의 조건에 맞춰 자동으로 결정된 메뉴입니다.'}</p><div class="meta-row"><span class="meta-chip">⭐ ${w.rating||'4.5'} ${w.review_count?`(${money(w.review_count)} 리뷰)`:''}</span><span class="meta-chip">₩ ${money(w.price_min)} ~ ${money(w.price_max)}</span><span class="meta-chip">◷ ${w.meal_minutes||60}분</span></div></div></div>`;$('reasons').innerHTML=reasons.map(x=>`<li>${x}</li>`).join('');setText('hours',`${w.lunch_start?.slice(0,5)||'11:00'} ~ ${w.lunch_end?.slice(0,5)||'15:00'}`);setText('breakTime',w.break_start?`브레이크타임 ${w.break_start.slice(0,5)}~${w.break_end?.slice(0,5)||''}`:'점심 영업시간');setText('menu',w.main_menu||w.category||'-');setText('address',w.address||'-');setText('phone',w.phone||'등록 예정');setText('contextDistance',w.route_distance_km!=null?`${w.route_distance_km.toFixed(1)} km / 도보 ${w.travel_minutes||'?'}분`:w.distance_km!=null?`${w.distance_km.toFixed(1)} km`:'위치 미사용'); setText('v6Travel',w.travel_minutes!=null?`약 ${w.travel_minutes}분`:'실제 이동시간 미확인'); setText('v6Open',w.open_now===null?'실시간 영업 여부 미확인':w.open_now?'현재 영업 중':'현재 점심 영업 아님'); setText('v6OpenTime',`${w.local_time||''} · ${w.country_code==='JP'?'일본':'한국'} 현지시간`);setText('contextWeather',currentWeather.temperature!=null?`${currentWeather.weather} ${currentWeather.temperature}°C`:currentWeather.weather); updateWinnerDirections();}
 
+// 현재 좌표 또는 선택 도시로 날씨를 요청하고 실패하면 기본 안내를 표시합니다.
 async function loadWeather(){ const cityId=+$('cityId').value||1; try{ const qs=new URLSearchParams({city_id:String(cityId)}); if(currentLocation.latitude) {qs.set('lat',currentLocation.latitude);qs.set('lon',currentLocation.longitude);} const r=await fetch('/api/context/today?'+qs.toString()); const d=await r.json(); currentWeather=d; setText('sideWeather',d.temperature!=null?`${d.weather} ${d.temperature}°C`:d.weather); setText('contextWeather',d.temperature!=null?`${d.weather} ${d.temperature}°C`:d.weather); setText('contextWeekday',new Intl.DateTimeFormat('ko-KR',{weekday:'long',timeZone:'Asia/Seoul'}).format(new Date())); setText('weatherDetail',d.ok?'실시간 날씨를 자동 반영':'기본 조건으로 결정'); setText('v6Weather',d.temperature!=null?`${d.weather} ${d.temperature}°C`:(d.weather||'확인 실패')); setText('v6WeatherSource',d.ok?`${d.source} · ${d.observedAt||''}`:'날씨 미확인: '+(d.message||'외부 API 연결 실패')); return d; }catch(e){ currentWeather={weather:'날씨 정보 없음',kind:'clear'}; return currentWeather; }}
 
 function getBrowserLocation(){ if(!navigator.geolocation){alert('이 브라우저는 위치 기능을 지원하지 않습니다.');return;} setText('locationState','위치를 확인하는 중...'); navigator.geolocation.getCurrentPosition(pos=>{currentLocation={latitude:pos.coords.latitude,longitude:pos.coords.longitude};setText('locationState',`현재 위치 저장됨 (${currentLocation.latitude.toFixed(4)}, ${currentLocation.longitude.toFixed(4)})`); if(loggedIn) saveProfile(true); decide();},()=>{setText('locationState','위치 권한을 허용하면 거리 계산이 가능합니다.');alert('위치 권한이 거부되었습니다. 위치 없이도 점심 결정은 가능합니다.');},{enableHighAccuracy:true,timeout:8000,maximumAge:300000});}
 
+// 현재 선택 조건으로 점심 API를 요청합니다. 결과와 실패 안내는 같은 기존 카드에서 갱신합니다.
 async function decide(){
   const btn=$('decide'); if(btn?.disabled)return;
   if(btn){btn.disabled=true;btn.dataset.originalText=btn.dataset.originalText||btn.textContent;btn.textContent='⏳ 오늘 점심을 결정하는 중...';}
@@ -101,18 +116,23 @@ async function decide(){
   finally{if(btn){btn.disabled=false;btn.textContent=btn.dataset.originalText||'오늘 점심 다시 결정하기';}}
 }
 
+// 회원의 조건을 서버에 저장합니다. 비회원 상태와 실패 응답을 구분합니다.
 async function saveProfile(silent=false){
  if(!loggedIn){openAuth('login');alert('내 조건을 저장하려면 먼저 로그인하세요.');return;}
  const body={work_city_id:+$('cityId').value||null,work_area_id:+($('areaId').dataset.legacyAreaId||0)||null,budget_max:+$('budget').value,people:+$('people').value,lunch_start:'11:30:00',lunch_end:'13:30:00',liked_categories:$('liked').value,disliked_categories:$('disliked').value,latitude:currentLocation.latitude,longitude:currentLocation.longitude};
  const r=await fetch('/api/user/preferences',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)return alert(d.message);if(!silent)alert('내 조건을 저장했습니다. 다음 자동 결정부터 반영됩니다.');if(!silent)decide();}
 
+// 방문·거절과 이유를 저장한 뒤 이력과 추천을 다시 읽습니다.
 async function feedback(action){if(!currentWinner)return;if(!loggedIn){openAuth('login');alert('로그인하면 방문·거부 이력이 저장됩니다.');return;}let reason='';if(action==='rejected')reason=prompt('다른 곳을 선택한 이유를 적어주세요.\n예: 비쌈 / 멂 / 대기시간 / 음식이 싫음 / 개인사정','음식이 싫음')||'사용자가 다른 곳을 선택함';const r=await fetch('/api/recommendation/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({restaurant_id:currentWinner.id,action,reject_reason:reason})});const d=await r.json();if(!r.ok)return alert(d.message);if(action==='visited')alert('방문 기록을 저장했습니다. 다음 결정에 반영됩니다.');else alert('거부 이유를 저장했습니다. 다음 결정에서 불이익으로 반영됩니다.');loadHistory();decide();}
 
+// 회원 기록을 요약·목록으로 표시하고 선호 집계도 새로 불러옵니다.
 async function loadHistory(){if(!loggedIn)return;const r=await fetch('/api/user/history');const d=await r.json();if(!r.ok)return;const rows=d.rows||[];const visited=rows.filter(x=>x.action==='visited').length,rejected=rows.filter(x=>x.action==='rejected').length,recommended=rows.filter(x=>x.action==='recommended'||x.action==='accepted').length;$('historySummary').innerHTML=`<div><b>${rows.length}</b><span>전체 기록</span></div><div><b>${visited}</b><span>방문 완료</span></div><div><b>${rejected}</b><span>거부 기록</span></div><div><b>${recommended}</b><span>자동 결정</span></div>`;$('historyList').innerHTML=rows.length?rows.map(x=>`<div class="history-item"><img src="${imageForRestaurant(x)}"><div><b>${x.name}</b><small>${x.visit_date} · ${x.category} · ${x.action==='visited'?'방문 완료':x.action==='rejected'?'다른 곳 선택':x.action==='recommended'||x.action==='accepted'?'자동 결정':'기록'}</small>${x.reject_reason?`<em>거부 이유: ${x.reject_reason}</em>`:''}${x.decision_score!=null?`<em>당시 결정 점수: ${x.decision_score}</em>`:''}</div></div>`).join(''):'<div class="empty-history">아직 점심 이력이 없습니다. 오늘부터 방문·거부 행동을 학습합니다.</div>';await loadLearning();}
 
+// 방문·거부 횟수의 집계를 보여줍니다. 브라우저에서 ML 모델을 학습하는 함수는 아닙니다.
 async function loadLearning(){if(!loggedIn)return;try{const r=await fetch('/api/user/learning');const d=await r.json();if(!r.ok)return;const t=d.totals||{};const cats=d.categories||[];const reasons=d.reasons||[];setText('learningText',`방문 ${t.visited||0}회 · 거부 ${t.rejected||0}회 · 자동 결정 ${t.recommended||0}회 데이터를 이용해 다음 결정을 조정합니다.`);const tags=[];cats.slice(0,4).forEach(c=>{if(Number(c.visited)>Number(c.rejected))tags.push(`<span class="learning-tag">${c.category} 선호 패턴</span>`);else if(Number(c.rejected)>0)tags.push(`<span class="learning-tag negative">${c.category} 회피 패턴</span>`);});reasons.slice(0,3).forEach(r=>tags.push(`<span class="learning-tag negative">${r.reject_reason} ${r.count}회</span>`));$('learningTags').innerHTML=tags.join('')||'<span class="learning-tag">아직 충분한 행동 데이터가 없습니다</span>';}catch(e){}}
 
 function openAuth(mode){authMode=mode;clearAuthMessage();$('authModal').classList.remove('hidden');$('authTitle').textContent=mode==='login'?'로그인':'회원가입';$('submitAuth').textContent=mode==='login'?'로그인':'회원가입';$('registerNameWrap').classList.toggle('hidden',mode==='login');$('authSwitch').innerHTML=mode==='login'?`처음 방문하셨나요? <button onclick="openAuth('register')">회원가입</button>`:`이미 계정이 있나요? <button onclick="openAuth('login')">로그인</button>`;}
+// 선택한 로그인/가입 모드에 맞게 서버로 입력을 보내고 응답을 확인합니다.
 async function submitAuth(){
   const body={username:$('authUsername').value.trim(),password:$('authPassword').value,name:$('authName').value.trim()};clearAuthMessage();
   if(!body.username||!body.password||(authMode==='register'&&!body.name)){showAuthMessage('필수 항목을 모두 입력하세요.','error');return;}
@@ -139,6 +159,7 @@ function setLink(id,url){
  if(url){a.href=url;a.setAttribute('aria-disabled','false');a.classList.remove('disabled-link');}
  else{a.removeAttribute('href');a.setAttribute('aria-disabled','true');a.classList.add('disabled-link');}
 }
+// 현재 추천 장소를 지도 공통 모듈에 넘겨 지도/길찾기 링크를 새로 만듭니다.
 function updateWinnerDirections(){
  if(!currentWinner){setLink('mapBtn',null);setLink('routeBtn',null);return;}
  const region=selectedRegion(),place={...region,...currentWinner};
@@ -146,6 +167,7 @@ function updateWinnerDirections(){
  setLink('routeBtn',MapLinks.url('directions',place,{mode:$('routeOrigin')?.value||'current',region}));
  $('routeBtn').textContent=currentWinner.is_demo?'➤ 선택 지역 길찾기':'➤ 선택된 음식점 길찾기';
 }
+// 직접 입력한 주소·장소명으로 길찾기를 엽니다. 관리자 등록이나 API 키가 필요하지 않습니다.
 function updateDirectRoute(){
  const destination=$('directDestination')?.value.trim();
  setLink('directRouteBtn',destination?MapLinks.url('directions',destination,{mode:$('routeOrigin')?.value||'current',region:selectedRegion()}):null);
@@ -185,6 +207,7 @@ function updateTripLinks(){
   if(url)a.href=url;else a.removeAttribute('href');
  });
 }
+// 도시·일수를 서버에 전달하고 날짜별 6단계 장소와 확인/미확인 이동 정보를 표시합니다.
 async function makeTrip(){
  const city=Number($('travelCity').value),days=Number($('travelDays').value),button=$('makeTrip'),container=$('tripResult');
  if(!city||!Number.isInteger(days)||days<1||days>7)return alert('여행 지역과 일수를 선택하세요.');

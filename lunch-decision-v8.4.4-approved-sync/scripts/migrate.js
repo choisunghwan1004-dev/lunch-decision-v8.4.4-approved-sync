@@ -1,3 +1,8 @@
+/**
+ * 옛 점심 DB에서 새 정규화 DB로 데이터를 옮깁니다. 뉴스 스키마 업그레이드와는 별개입니다.
+ * --plan은 새 DB 트랜잭션도 마지막에 rollback합니다. --apply만 실제 반영하며 원본은 읽기 전용입니다.
+ * 부모 지역을 확정할 수 없는 행은 보류하고 매핑 기록으로 중복 이관을 제어합니다.
+ */
 // V8.4 migration. OLD_DB is always read only. NEW_DB all writes in one transaction.
 require('dotenv').config();
 const fs=require('node:fs'),path=require('node:path'),db=require('../db');

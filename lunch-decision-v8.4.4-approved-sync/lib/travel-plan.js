@@ -1,8 +1,13 @@
+/**
+ * 등록된 장소를 종류별로 나누고 하루 6단계 여행 일정에 배분하는 순수 로직입니다.
+ * 입력 places와 days를 받아 plan을 만듭니다. LLM 호출이나 예약 확정을 수행하는 엔진은 아닙니다.
+ */
 'use strict';
 // Pure, deterministic travel planner: uses available categories, distributes stops across days.
 const KEYS=['morning','lunch','cafe','afternoon','dinner','hotel'];
 const TYPES={morning:'attraction',lunch:'restaurant',cafe:'cafe',afternoon:'attraction',dinner:'restaurant',hotel:'lodging'};
 const isNumber=x=>Number.isFinite(Number(x))&&Number(x)>0;
+// 관광·음식·카페·숙박을 배분합니다. 장소가 부족해 재사용하면 그 한계를 표시합니다.
 function createPlan(places,days){
   const n=Number(days);
   if(!Number.isInteger(n)||n<1||n>7)throw Error('여행 일수는 1~7일이어야 합니다.');
@@ -27,6 +32,7 @@ function createPlan(places,days){
   const shortage=Object.keys(needed).filter(type=>groups[type].length<needed[type]);
   return {missing:[],plan,availability:Object.fromEntries(Object.entries(groups).map(([k,v])=>[k,v.length])),shortage};
 }
+// 각 일정의 구간별 이동 정보를 제한된 동시 요청으로 덧붙입니다. 미확인 구간은 별도로 셉니다.
 async function addRouteMetrics(plan,between,limit=4){
  const legs=[];let prev=null;
  for(const day of plan)for(const key of KEYS){const dest=day[key];if(prev)legs.push({from:prev,to:dest});prev=dest;}

@@ -1,3 +1,7 @@
+/**
+ * 사용자용 지역 소식: 점심 또는 여행의 실제 시군구 ID로 게시 기사만 조회합니다.
+ * 이 파일은 AI 생성·Fact 검증·승인 권한을 가지지 않으며 비공개 초안을 조회하지 않습니다.
+ */
 (() => {
   "use strict";
   const el = (id) => document.getElementById(id);
@@ -40,6 +44,7 @@
     request = 0,
     items = [],
     detailDialog;
+  // 현재 점심/여행 지역으로 공개 API를 조회합니다. 늦게 끝난 예전 요청이 최신 선택을 덮지 않게 번호를 비교합니다.
   async function refresh() {
     const region =
         Number(el(mode === "travel" ? "travelCity" : "cityId")?.value) || 0,
@@ -75,6 +80,7 @@
           "지역 소식을 불러올 수 없습니다. 잠시 후 다시 확인해 주세요.";
     }
   }
+  // 연속된 지역 선택 이벤트를 짧게 모아 마지막 선택으로 한 번 조회합니다.
   function schedule() {
     clearTimeout(timer);
     timer = setTimeout(refresh, 150);

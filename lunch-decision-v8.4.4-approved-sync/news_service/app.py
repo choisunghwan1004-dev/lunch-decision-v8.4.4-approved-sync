@@ -1,3 +1,7 @@
+# 입구 역할: Node 프록시가 전달한 HTTP 요청을 받아 검사한 후 NewsService에 맡깁니다.
+# 읽는 순서: 인증(auth) → 입력 형식(schemas.py) → 업무 처리(service.py) → MySQL(db.py).
+# 화면의 /api/news 접두사는 Node에서 제거하므로 Python 경로에는 /topics처럼 적습니다.
+
 """Internal FastAPI service; browser access goes through the existing Node session."""
 import hmac
 import logging
@@ -16,30 +20,36 @@ app = FastAPI(title='V8.4.4 뉴스 운영 API', version='8.5.2', docs_url=None, 
 log = logging.getLogger('news')
 
 
+# Node만 아는 64자리 내부 토큰을 비교합니다. 공개 기사 조회도 이 내부 인증을 거칩니다.
 def auth(x_news_internal_token: str | None = Header(None)):
     token = os.getenv('NEWS_INTERNAL_TOKEN', '')
     if not re.fullmatch(r'[a-fA-F0-9]{64}', token) or not x_news_internal_token or not hmac.compare_digest(token, x_news_internal_token):
         raise NewsError('뉴스 내부 인증에 실패했습니다.', 403)
 
 
+# Node가 세션에서 정한 검토자 이름을 복원합니다. 브라우저 입력으로 검토자를 지정하지 않습니다.
 def editor(x_news_editor: str = Header('admin')):
     return unquote(x_news_editor).strip()[:100] or 'admin'
 
 
+# 요청 처리에 사용할 업무 객체를 만듭니다. 테스트는 이 의존성을 대역으로 바꿀 수 있습니다.
 def get_service():
     return NewsService()
 
 
+# 업무상 거절 사유와 상태 코드(404·409 등)를 화면에 전달합니다.
 @app.exception_handler(NewsError)
 async def news_error(_, error):
     return JSONResponse(status_code=error.status, content={'ok': False, 'detail': error.message})
 
 
+# 입력 내용이나 AI 출력의 형식 오류를 HTTP 422로 전달합니다.
 @app.exception_handler(ValueError)
 async def value_error(_, error):
     return JSONResponse(status_code=422, content={'ok': False, 'detail': str(error)})
 
 
+# 예상하지 못한 DB/API 오류를 감춥니다. 연결 정보나 비밀 키를 응답으로 보내지 않습니다.
 @app.exception_handler(Exception)
 async def service_error(_, error):
     log.error('news service error: %s code=%s', type(error).__name__, getattr(error, 'errno', ''))
@@ -49,6 +59,7 @@ async def service_error(_, error):
 AUTH = [Depends(auth)]
 
 
+# 스키마 버전과 키 설정 여부를 확인합니다. 키가 있다는 표시만으로 실제 API 호출 성공을 뜻하지 않습니다.
 @app.get('/health', dependencies=AUTH)
 def health(service: NewsService = Depends(get_service)):
     with service.db.transaction() as tx:

@@ -1,3 +1,8 @@
+/**
+ * 뉴스 관리자 화면: 주제·출처·Fact·초안 목록과 입력/검토 대화상자를 제어합니다.
+ * 화면은 입력을 모으고 Python API가 최종 조건을 검사합니다. 버튼 비활성화만을 권한 검사로 믿지 않습니다.
+ * 등록·수정 저장 후에는 대화상자를 닫고 목록을 새로 읽어 상태를 확인할 수 있게 합니다.
+ */
 /* News is namespaced so existing lunch/travel/admin behavior remains intact. */
 (() => {
   "use strict";
@@ -53,6 +58,7 @@
     el("newsStatus").textContent = message;
     el("newsStatus").dataset.error = String(error);
   };
+  // 동일 출처의 Node 프록시를 호출합니다. 세션 쿠키와 쓰기 확인 헤더를 보내지만 비밀 키는 보내지 않습니다.
   async function api(path, method = "GET", data) {
     const response = await fetch("/api/news" + path, {
       method,
@@ -70,6 +76,7 @@
     }
     return result;
   }
+  // 입력/검토 팝업을 만들고 저장 중 중복 클릭·실패 안내·저장 후 목록 갱신을 공통 처리합니다.
   function modal(title, body, onSubmit) {
     if (dialog) {
       dialog.close();
@@ -113,6 +120,7 @@
   }
   const submit = (label) =>
     `<button class="news-submit" type="submit">${label}</button>`;
+  // 주제 목록을 다시 읽고 현재 선택 주제를 유지합니다.
   async function refresh() {
     topics = await api("/topics");
     const selector = el("newsTopic");
@@ -130,6 +138,7 @@
       el("newsWorkspace").innerHTML =
         "<p>주제를 만들고 공식 출처와 Fact를 등록하세요. 검증되지 않은 자료는 AI에 전달하지 않습니다.</p>";
   }
+  // 선택 주제의 출처·Fact·초안 목록을 독립 요청으로 읽어 단계별로 표시합니다.
   async function workspace() {
     const topic = topics.find((t) => Number(t.id) === active);
     if (!topic) return;
@@ -144,6 +153,7 @@
  <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="fact-status" data-id="${f.id}">상태 변경</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><div><h3>3. 초안 · 최종 검토 · 게시</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">기사 검토·수정</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
   }
+  // DB의 실제 시군구를 선택해 새 주제를 등록합니다.
   function newTopic() {
     modal(
       "뉴스 주제 등록",
@@ -159,6 +169,7 @@
       },
     );
   }
+  // 원문 URL·공개 시점·관련 구절·이용 조건을 받습니다. 수정 후 근거 재검증이 필요합니다.
   function sourceForm(id) {
     const s = sources.find((x) => Number(x.id) === id) || {};
     modal(
@@ -188,6 +199,7 @@
       },
     );
   }
+  // Fact 내용·유형·수치·기간을 입력받습니다. 수치 칸이 비었으면 null로 전송합니다.
   function factForm(id) {
     const f = facts.find((x) => Number(x.id) === id) || {};
     modal(
@@ -220,6 +232,7 @@
       },
     );
   }
+  // Fact에 같은 주제의 출처와 원문 위치를 연결하거나 해제합니다.
   function evidenceForm(id) {
     const f = facts.find((x) => Number(x.id) === id);
     modal(
@@ -248,9 +261,11 @@
         }),
     );
   }
+  // 현재 또는 과거 스냅샷의 근거를 같은 형태로 보여줍니다. 문자열은 HTML 이스케이프합니다.
   function evidenceHTML(f) {
     return `<div class="news-evidence"><b>${escape(f.fact_key)}</b><p>${escape(f.value_text)}</p>${f.evidence.map((e) => `<p><a href="${safeURL(e.source_url)}" target="_blank" rel="noopener noreferrer">${escape(e.source_title)} ↗</a> · ${escape(e.organization)}</p><small>${escape(String(e.published_at || ""))} · ${escape(e.license_note)}</small><blockquote>${escape(e.source_excerpt)}</blockquote><p>${escape(e.excerpt_reference)} · ${escape(e.evidence_note)}</p>`).join("") || "<p>출처 연결이 없습니다.</p>"}</div>`;
   }
+  // 사람이 원문을 직접 대조했는지 체크하고 검증 의견을 API로 보냅니다.
   function verifyForm(id) {
     const f = facts.find((x) => Number(x.id) === id);
     modal(
@@ -277,6 +292,7 @@
       },
     );
   }
+  // 기사 문장과 현재/과거 근거를 나란히 표시하고 검토·승인·게시 동작을 연결합니다.
   async function openDraft(id) {
     const d = await api("/drafts/" + id),
       editable = ["generated", "in_review", "changes_requested"].includes(
@@ -374,6 +390,7 @@
         true,
       );
   }
+  // 기존 초안을 덮어쓰지 않고 새 수정본을 저장합니다. Fact Key 목록을 쉼표로 나눠 전송합니다.
   function editDraft(d) {
     const sentence = (c, index) =>
       `<div class="news-sentence">${text("sentence", "본문 문장 " + index, c.statement_text, 'required maxlength="1000"')}${input("fact_keys", "Fact Key (쉼표로 구분)", c.fact_keys.join(", "), "text", "required")}<button type="button" data-remove-sentence>문장 삭제</button></div>`;

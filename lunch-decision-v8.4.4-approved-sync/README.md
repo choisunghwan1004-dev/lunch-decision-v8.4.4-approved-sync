@@ -11,6 +11,9 @@
 - [3. DB 설계](#3-db-설계)
 - [4. 데이터 수집 방법](#4-데이터-수집-방법)
 - [5. 개발 환경](#5-개발-환경)
+- [6. 코드 읽는 순서](#6-코드를-읽는-순서와-한국어-주석)
+- [7. SQL 처리 방법](#7-sql-파일-처리-방법)
+- [8. 테스트 체크리스트](#8-테스트-실행과-확인-항목)
 
 버전별 상세 안내: [V8.4.2 여행·샘플](README_V8.4.2.md) · [V8.4.3 화면·길찾기](README_V8.4.3.md) · [V8.4.4 승인형 동기화](README_V8.4.4.md)
 
@@ -376,6 +379,165 @@ npm start
 브라우저 확인: ① 한국/일본→지역→점심 추천·지도·여행 일수별 6단계 표시, ② 관리자의 지역/음식점 등록과 성공 메시지·목록 갱신을 확인합니다. 동기화 실연동은 4.4절의 연결 문제를 보완한 뒤 미리보기→비활성 저장→최종 활성화를 확인합니다.
 
 ---
+
+## 6. 코드를 읽는 순서와 한국어 주석
+
+바이브코딩으로 작성한 코드를 직접 확인할 수 있도록 서버·DB·화면·설치 스크립트와 SQL에 한국어 주석을 추가했습니다. 주석은 함수가 **무엇을 입력받아 어디에 저장하고 무엇을 반환하는지**, 검증·트랜잭션·승인 차단이 **왜 필요한지** 설명합니다. 기존 UI·State·선택자·실행 로직을 유지했습니다.
+
+| 읽는 순서 | 파일 | 확인할 내용 |
+| --- | --- | --- |
+| 1 | [server.js](server.js) | 서버 시작, 세션, `/api/news`를 `/api`보다 먼저 연결하는 이유 |
+| 2 | [db.js](db.js), [news_service/db.py](news_service/db.py) | 연결 풀, 기존/운영 DB 구분, commit·rollback |
+| 3 | [public/index.html](public/index.html), [public/script.js](public/script.js) | 기존 점심·여행 화면, 지역 선택과 실제 PK 전달 |
+| 4 | [routes/api.js](routes/api.js), `lib/` | 회원·지역·추천·여행 API와 판단 규칙 |
+| 5 | [routes/news-proxy.js](routes/news-proxy.js), [news_service/app.py](news_service/app.py) | 브라우저 → Node 세션 인증 → FastAPI 요청 |
+| 6 | [news_service/schemas.py](news_service/schemas.py), [validation.py](news_service/validation.py) | 필수값·수치·기간·출처·문장별 Fact 검사 |
+| 7 | [news_service/service.py](news_service/service.py) | Fact Sheet → 초안 → 문장 검토 → 최종 승인 → 게시 |
+| 8 | [news_service/article_ai.py](news_service/article_ai.py) | `gpt-6-luna` 요청·구조화 응답·사용량 기록 |
+| 9 | [public/news-admin.js](public/news-admin.js), [public/news-public.js](public/news-public.js) | 입력 팝업·저장 후 목록 복귀·공개 기사 표시 |
+| 10 | [news_service/setup.py](news_service/setup.py), `sql/` | 스키마 생성과 구형 뉴스 구조의 호환 처리 |
+
+`PK`는 행을 식별하는 기본키, `FK`는 다른 테이블의 행을 참조하는 외래키입니다. `Fact Sheet`는 검증된 사실과 원자료 묶음이며, `hash`는 내용 변경을 감지하는 지문입니다. 해시 일치가 사실의 진위를 보증하지는 않습니다. 뉴스의 `generated`, `in_review`, `approved`, `published`는 각각 초안·검토 중·최종 승인·게시 상태입니다.
+
+## 7. SQL 파일 처리 방법
+
+### 7.1 파일별 용도와 적용 명령
+
+`package.json`이 있는 프로젝트 폴더에서 실행합니다. SQL 파일을 전부 드래그해 일괄 실행하지 마세요. 먼저 `.env`의 DB 접속 정보와 `V83_DB_NAME=lunch_decision_v83`, `OLD_DB_NAME=lunch_decision`을 확인합니다. 두 DB 이름은 달라야 합니다.
+
+| 순서 | SQL | 처리 방법 | 재실행 시 동작 |
+| --- | --- | --- | --- |
+| 1 | [01_schema.sql](sql/01_schema.sql) | `npm run setup` | 기본 테이블은 `IF NOT EXISTS`; 데이터 삭제 없음 |
+| 2 | [02_v84_extensions.sql](sql/02_v84_extensions.sql) | 위 `npm run setup`이 필요한 확장 컬럼만 반영 | **파일 자체의 `ALTER ADD`를 반복 실행하면 중복 컬럼 오류 가능** |
+| 3 | [03_v844_google_sync.sql](sql/03_v844_google_sync.sql) | `npm run setup:sync` | 승인 기록 테이블이 있으면 다시 만들지 않음 |
+| 4 | [04_news_v852.sql](sql/04_news_v852.sql) | `.\.venv\Scripts\python.exe -m news_service.setup --init-env` | 신규 테이블·부족 컬럼/인덱스·버전 기록을 함께 확인 |
+| 별도 | `tests/news/fixtures/*.sql` | 자동 이관 테스트 전용 | **운영 DB에 직접 실행하지 않음** |
+
+`01_schema.sql`에는 기본 DB 생성과 `USE lunch_decision_v83`가 있습니다. `scripts/setup.js`도 이 DB 이름만 자동 생성을 허용합니다. 뉴스 설치는 루트 `.env`의 `DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/V83_DB_NAME`을 사용하며, 예전 독립형의 `NEWS_DB_*` 설정 파일을 자동으로 읽지 않습니다.
+
+### 7.2 처음 설치하는 경우
+
+MySQL 8 서버가 실행 중이어야 합니다. PowerShell을 열고 프로젝트 폴더로 이동합니다. 기존 `.env`가 있으면 덮어쓰지 않습니다.
+
+```powershell
+npm ci
+# .env가 없는 경우에만 다음 명령 실행 후 DB·관리자 비밀번호를 편집
+# Copy-Item .env.example .env
+notepad .env
+npm run setup
+npm run setup:sync
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r news_service/requirements.txt
+.\.venv\Scripts\python.exe -m news_service.setup --init-env
+```
+
+샘플을 보고 싶은 개발 DB에서만 `npm run seed:demo`를 실행합니다. 한국·일본 테스트 지역과 가상 장소를 추가하며 실제 관광 정보 수집이 아닙니다. 이미 V8.4.4를 운영하고 있다면 전체 초기화·샘플 등록 없이 뉴스 설치만 진행하세요.
+
+### 7.3 기존 뉴스 테이블을 업그레이드하는 경우
+
+먼저 서버를 종료하고 백업합니다. 기존 독립형/통합형 뉴스 테이블이 발견되면 기본 설치 명령은 멈추며, 백업 확인 후 다음 명령으로 호환 컬럼·인덱스를 추가합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m news_service.setup --init-env --upgrade-existing
+```
+
+구형 Fact는 검증 대기로, 기존 승인·게시 기사는 재검토 상태로 바뀝니다. 기존 기사·출처·검증 의견을 지우지 않습니다. 중복 데이터나 알 수 없는 스키마는 자동 삭제하지 않고 중단합니다. MySQL DDL은 자동 커밋되므로 설치 도중 오류가 나면 메시지를 확인하고 재실행하며, 전체 작업이 롤백되었다고 가정하지 않습니다.
+
+**백업 파일의 종류를 구분하세요.** 기존 `npm run backup`은 옛 DB와 운영 DB를 읽어 `backups/*.ndjson.gz`와 Manifest를 만듭니다. 옛 DB가 없거나 접근 권한이 없으면 이 명령은 실패할 수 있습니다. 이 파일은 SQL이 아니므로 MySQL의 `SOURCE`로 읽을 수 없습니다. 특히 뉴스의 이진 해시까지 SQL로 보관하려면 `mysqldump --hex-blob`을 사용합니다.
+
+다음은 로컬 MySQL 8 설치 경로의 예입니다. 실제 설치 경로·포트·계정·DB 이름에 맞게 바꿉니다. `--password` 뒤에 실제 비밀번호를 적지 말고 요청 시 입력합니다.
+
+```powershell
+New-Item -ItemType Directory -Force backups | Out-Null
+& "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqldump.exe" --host=127.0.0.1 --port=3306 --user=root --password --single-transaction --hex-blob --databases lunch_decision_v83 --result-file="$PWD\backups\before_news_upgrade.sql"
+if ($LASTEXITCODE -ne 0) { throw '백업 실패: 업그레이드를 진행하지 마세요.' }
+Get-Item .\backups\before_news_upgrade.sql
+```
+
+### 7.4 MySQL에서 설치 결과 확인
+
+Workbench의 쿼리 탭 또는 MySQL CLI에서 다음 **조회문**을 실행합니다. CLI 프로그램이 PATH에 없으면 설치된 `mysql.exe`의 전체 경로로 실행하세요.
+
+```sql
+USE lunch_decision_v83;
+SELECT DATABASE();
+SHOW TABLES;
+SHOW TABLES LIKE 'news_%';
+SELECT name, version, applied_at FROM news_schema_version;
+SHOW COLUMNS FROM news_drafts;
+SHOW INDEX FROM news_sources;
+SELECT COUNT(*) AS source_count FROM news_sources;
+SELECT status, COUNT(*) AS count FROM news_drafts GROUP BY status;
+```
+
+뉴스 업무 테이블 10개와 `news_schema_version` 1개, 버전 `8.5.2`, `news_drafts.fact_snapshot_json` 컬럼을 확인합니다. 설치 직후 행 수 0은 정상입니다. 기본 13개 + 이관 매핑 1개 + Google 승인 1개 + 뉴스 11개를 모두 설치한 경우 총 26개 테이블입니다.
+
+`Table doesn't exist`는 설치 순서/DB 선택을, `Duplicate column`은 02 SQL을 직접 재실행했는지, `Access denied`는 루트 `.env`의 계정·비밀번호·DB 권한을 확인하세요. 비밀번호를 화면 캡처나 GitHub에 올리지 마세요.
+
+### 7.5 SQL 덤프와 기존 백업 복원
+
+`before_news_upgrade.sql`은 DB 생성·`USE`를 포함할 수 있으므로 운영 DB에서 무심코 실행하지 않습니다. 복구가 필요하면 별도 MySQL 인스턴스 또는 복구용 DB에서 대상 이름을 검토하고 확인합니다. `SOURCE`는 `.sql` 파일을 MySQL 클라이언트 안에서 실행하는 명령이며 PowerShell 명령이 아닙니다. PowerShell의 `< schema.sql` 리디렉션을 안내 명령처럼 그대로 입력하지 마세요.
+
+기존 압축 NDJSON/Manifest는 `scripts/restore-to-new-db.js`의 **별도 복구 경로**이며 새 `lunch_restore_*` DB만 허용합니다. 파일 확장자를 SQL로 바꾸면 복원되는 방식이 아닙니다. 백업 성공과 실제 복원 성공은 별도로 확인해야 합니다.
+
+## 8. 테스트 실행과 확인 항목
+
+### 8.1 무료 기본 테스트
+
+프로젝트 폴더에서 실행합니다. Python은 기존 가상 환경을 사용하며, 없다면 7.2절에서 먼저 준비합니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r news_service/requirements-dev.txt
+npm run check
+npm run test:ui
+.\.venv\Scripts\python.exe -m pytest tests/news -q
+```
+
+현재 기준 Node 31개, Python 기본 25개가 통과하며 MySQL 전용 4개는 기본 실행에서 건너뜁니다. 기본 Python 검사는 테스트 전용 SQLite 대역을 쓰지만 운영 DB는 MySQL입니다. AI 응답은 대역이므로 무료 테스트의 통과가 실제 OpenAI API 호출·모델 권한·청구 성공을 의미하지 않습니다.
+
+### 8.2 DB와 서버가 필요한 테스트
+
+| 명령 | 실행 조건 | 확인 항목 |
+| --- | --- | --- |
+| `npm run verify` | V8.4.4 DB 준비 | 스키마·FK·지역/장소 연결 |
+| `npm run verify:travel` | 개발 DB에 여행 시연 자료 등록 | 3일·18단계 배분, 당일 중복, 장소 부족 |
+| `npm run test:api` | 준비된 DB와 시연 지역·종류별 장소 | 상태 API, 권한 보호, 지역 트리, 점심·1~3일 여행 |
+| `NEWS_TEST_MYSQL=1`로 Python 테스트 | 별도 임시 DB 생성·삭제 권한 | 실제 MySQL API 흐름과 구형 뉴스 SQL 2종 업그레이드 |
+| `python tests/news/browser_smoke.py` | MySQL, Node, Playwright·Chromium | 관리자 등록·검수·게시와 일본·모바일 공개 화면 |
+
+PowerShell에서 MySQL 통합 검사는 아래처럼 실행합니다. 테스트는 `news_test_*`라는 별도 DB를 만들고 해당 DB만 제거합니다.
+
+```powershell
+$env:NEWS_TEST_MYSQL='1'
+.\.venv\Scripts\python.exe -m pytest tests/news -q
+Remove-Item Env:NEWS_TEST_MYSQL
+```
+
+`test:map`, `test:sync`, `test:news-proxy`는 `test:ui`에 포함된 일부 테스트를 따로 실행하는 명령입니다. 같은 검사를 중복 집계하지 않습니다.
+
+### 8.3 브라우저 수동 테스트 체크리스트
+
+| ID | 실행할 동작 | 통과 기준 |
+| --- | --- | --- |
+| T01 | 사용자 화면에서 한국·일본 지역을 단계별 선택 | 부모 변경 시 하위가 초기화되고 실제 선택 지역의 장소가 표시됨 |
+| T02 | 점심 다시 결정, 지도·직접 길찾기 | 기존 카드가 갱신되고 목적지 링크가 열림 |
+| T03 | 개발 DB에서 1·2·3일 여행 선택 | 하루 6단계 표시, 미확인 구간을 실제 0분으로 표시하지 않음 |
+| T04 | 비로그인 상태에서 비공개 뉴스 API 요청 | HTTP 401, 공개 기사 목록만 접근 가능 |
+| T05 | 관리자 뉴스 주제·출처·Fact 입력·수정 | 저장 후 팝업이 닫히고 목록 상태가 갱신됨 |
+| T06 | 출처 없는 Fact 또는 직접 대조 미확인으로 검증 시도 | HTTP 422 등 입력 거절, verified로 바뀌지 않음 |
+| T07 | 날짜 역전·수치 필수값 누락·잘못된 URL | 입력 오류가 표시되고 잘못된 자료를 저장/검증하지 않음 |
+| T08 | 검증 Fact로 기사 초안 생성 | 제목 포함 모든 문장은 미검토, 생성만으로 공개되지 않음 |
+| T09 | 일부 문장 미검토 또는 불일치 상태에서 승인/게시 시도 | HTTP 409 등 차단, 사용자 화면에 노출되지 않음 |
+| T10 | 최종 확인 4개 중 하나라도 미확인으로 승인 시도 | HTTP 422 등 차단, 승인/게시 상태가 되지 않음 |
+| T11 | 기사 수정 | 새 수정 번호 생성, 전 문장 재검토, 과거 원문·근거 보존 |
+| T12 | 모든 문장 대조 → 최종 승인 → 게시 | 승인과 게시가 별도이며 선택 지역 사용자 화면에 기사·출처 표시 |
+| T13 | 게시 후 Fact·출처·근거 연결 변경 | 승인 해제, 게시 중단, 이전 원자료 스냅샷은 보존 |
+| T14 | 시연 자료를 운영 승인·게시 시도 | 차단되며 공개 기사에 섞이지 않음 |
+| T15 | 없는 ID·다른 주제 ID·오래된 내용 해시로 수정 | 404/409 등으로 거절, 다른 주제 데이터 손상 없음 |
+| T16 | 모바일 너비에서 팝업·출처·카드·닫기 확인 | 텍스트 겹침·뉴스 영역 가로 넘침 없이 읽고 닫을 수 있음 |
+
+실제 OpenAI 테스트는 서버 `.env`의 키와 `gpt-6-luna` 사용 권한을 준비한 후 관리자에서 검증 Fact로 초안을 한 번 생성해 확인합니다. 비용이 발생할 수 있습니다. 실패 응답·미완료 응답을 승인 기사로 저장해서는 안 됩니다. Google 동기화의 알려진 진입부 문제는 4.4절을 확인하며, 무료 로직 테스트만으로 Google 유료 API 성공을 판단하지 않습니다.
+
 
 <details>
 <summary>통합 전 기록: 기존 설치·이관·뉴스 확장 작업 안내</summary>

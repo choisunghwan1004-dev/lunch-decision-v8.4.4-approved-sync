@@ -1,3 +1,8 @@
+# 설치·호환 이관 도구: 신규 SQL 적용과 구형 뉴스 테이블의 부족한 컬럼 추가를 담당합니다.
+# 직접 04_news_v852.sql만 실행하면 버전 기록·구형 구조 보정이 빠지므로 이 모듈로 설치합니다.
+# 주의: MySQL DDL은 자동 커밋되므로 아래 rollback이 이미 실행한 ALTER TABLE까지 되돌리지는 못합니다.
+# 기존 테이블이 있으면 백업 후 --upgrade-existing으로 실행합니다. 원본 OLD_DB_NAME은 사용하지 않습니다.
+
 """Create/upgrade news tables without modifying lunch/travel tables or OLD_DB_NAME."""
 import argparse
 from pathlib import Path
@@ -63,6 +68,7 @@ INDEXES = {
 }
 
 
+# 기존 DB·API 키 설정을 보존하며 비어 있는 내부 토큰만 생성합니다. 비밀 값을 출력하지 않습니다.
 def initialize_env():
     path = ROOT / '.env'
     text = path.read_text(encoding='utf-8-sig') if path.exists() else (ROOT / '.env.example').read_text(encoding='utf-8')
@@ -78,11 +84,13 @@ def initialize_env():
     print('.env 뉴스 내부 토큰 설정 완료 (토큰 값은 출력하지 않습니다).')
 
 
+# information_schema에서 실제 컬럼을 읽어 존재하지 않는 컬럼만 추가할 근거를 만듭니다.
 def columns(cur, table):
     cur.execute('SELECT COLUMN_NAME,COLUMN_TYPE,COLUMN_DEFAULT,IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s', (table,))
     return {row['COLUMN_NAME']: row for row in cur.fetchall()}
 
 
+# 인덱스 이름이 달라도 같은 컬럼 조합의 UNIQUE가 있으면 재생성하지 않습니다.
 def has_unique(cur, table, fields):
     cur.execute('SELECT INDEX_NAME,COLUMN_NAME,SEQ_IN_INDEX FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s AND NON_UNIQUE=0 ORDER BY INDEX_NAME,SEQ_IN_INDEX', (table,))
     groups = {}
@@ -91,6 +99,7 @@ def has_unique(cur, table, fields):
     return fields in groups.values()
 
 
+# 기존 구조 확인 → 중복 검사 → 신규 테이블 → 부족한 컬럼/인덱스 → 재검토 전환 → 버전 기록 순서입니다.
 def migrate(conn, allow_upgrade=False):
     cur = conn.cursor(dictionary=True)
     try:
@@ -174,6 +183,7 @@ def migrate(conn, allow_upgrade=False):
         cur.close()
 
 
+# 명령행 옵션을 읽고 필요하면 설정을 준비한 뒤 설치를 실행합니다. 끝나면 DB 연결을 닫습니다.
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--init-env', action='store_true')

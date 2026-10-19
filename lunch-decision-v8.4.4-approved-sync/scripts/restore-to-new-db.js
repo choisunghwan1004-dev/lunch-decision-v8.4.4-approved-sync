@@ -1,3 +1,7 @@
+/**
+ * 백업 Manifest의 체크섬을 검사하고 새 lunch_restore_* DB에 복원하는 도구입니다.
+ * 운영 DB 이름으로 덮어쓰지 않습니다. 이 주석 작업에서는 복구 동작을 실행하지 않습니다.
+ */
 // Optional disaster recovery: restores snapshot into a NEW EMPTY db only (never overwrites an existing DB).
 require('dotenv').config();
 const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),crypto=require('node:crypto'),readline=require('node:readline');

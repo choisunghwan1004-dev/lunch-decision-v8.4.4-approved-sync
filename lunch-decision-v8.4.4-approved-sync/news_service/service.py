@@ -1,3 +1,8 @@
+# 뉴스 업무의 중심: 출처 → Fact 검증 → 초안 → 문장 대조 → 최종 승인 → 게시를 처리합니다.
+# tx는 현재 트랜잭션의 SQL 실행 도구이며 %s 자리에 값을 별도로 전달합니다.
+# 쓰기 작업은 먼저 주제 행을 잠가 같은 주제의 승인·수정·게시가 엇갈리지 않게 합니다.
+# 읽는 핵심: sheet → generate → save_article → check_claim → review → publish → public.
+
 """Transactional newsroom workflow; approval binds both content and evidence."""
 import hashlib
 import json
@@ -7,22 +12,26 @@ from .db import Database
 from .validation import can_verify, complete_evidence, content_hash, fingerprint, parse_draft, snapshot, validate_source
 
 
+# 처리할 수 없는 업무 상태를 예외로 전달합니다. 앱은 이를 상태 코드와 한글 안내로 변환합니다.
 class NewsError(Exception):
     def __init__(self, message, status=409):
         self.message, self.status = message, status
 
 
+# 필수 행이나 목록이 없으면 즉시 중단하는 공통 검사입니다.
 def need(value, message, status=404):
     if not value:
         raise NewsError(message, status)
     return value
 
 
+# HTTP나 화면과 분리된 뉴스 업무 객체입니다. DB와 AI 생성기를 교체할 수 있어 독립 테스트가 가능합니다.
 class NewsService:
     def __init__(self, database=None, generator=None):
         self.db = database or Database()
         self.generator = generator or article_ai.generate_article
 
+    # 주제를 읽고 지역명을 붙입니다. lock=True면 다른 쓰기 작업이 끝날 때까지 같은 주제를 기다립니다.
     def topic(self, tx, topic_id, lock=False):
         # Always lock the topic before locking or changing subordinate rows.
         row = tx.one('SELECT * FROM news_topics WHERE id=%s' + (' FOR UPDATE' if lock else ''), (topic_id,))
@@ -31,6 +40,7 @@ class NewsService:
         row['region_name'] = region['province_name'] + ' / ' + region['district_name']
         return row
 
+    # 초안·문장·Fact Key를 묶고 현재 내용의 해시를 계산합니다. 쓰기는 주제부터 잠급니다.
     def draft(self, tx, draft_id, lock=False):
         row = tx.one('SELECT * FROM news_drafts WHERE id=%s', (draft_id,))
         need(row, '초안을 찾지 못했습니다.')
@@ -45,6 +55,7 @@ class NewsService:
         row['region_name'] = topic['region_name']
         return row, topic
 
+    # verified이며 모든 출처가 완전한 Fact만 모읍니다. 주제·값·출처까지 묶어 근거 해시를 만듭니다.
     def sheet(self, tx, topic):
         facts = tx.all("SELECT * FROM news_facts WHERE topic_id=%s AND status='verified' ORDER BY fact_key", (topic['id'],))
         complete = []
@@ -60,10 +71,12 @@ class NewsService:
         digest = fingerprint({'topic': context, 'facts': snapshot(complete)})
         return complete, digest
 
+    # 누가 어떤 버전을 어떤 사유로 처리했는지 남깁니다. 승인에는 기사·근거 해시도 묶습니다.
     def review_log(self, tx, draft_id, action, editor, reason, fact_hash=None, article_hash=None):
         tx.insert('''INSERT INTO news_reviews(draft_id,action,reviewer_key,reason,fact_snapshot_sha256,content_sha256)
                      VALUES(%s,%s,%s,%s,%s,%s)''', (draft_id, action, editor, reason, fact_hash, article_hash))
 
+    # 근거가 바뀌면 같은 주제의 검토·승인을 해제하고 게시를 중단합니다. 과거 기사 원문은 삭제하지 않습니다.
     def invalidate(self, tx, topic_id, editor, reason):
         affected = tx.all("SELECT id FROM news_drafts WHERE topic_id=%s AND status NOT IN ('rejected','changes_requested')", (topic_id,))
         for draft in affected:
@@ -75,11 +88,13 @@ class NewsService:
         tx.execute("UPDATE news_drafts SET status='changes_requested',approved_by=NULL,approved_at=NULL WHERE topic_id=%s AND status NOT IN ('rejected','changes_requested')", (topic_id,))
         tx.execute("UPDATE news_claims SET status='unverified',check_note=NULL,checked_at=NULL WHERE draft_id IN (SELECT id FROM news_drafts WHERE topic_id=%s)", (topic_id,))
 
+    # 기존 시군구 목록을 읽습니다. 한국·일본 모두 동일한 districts PK를 사용합니다.
     def regions(self):
         with self.db.transaction() as tx:
             rows = tx.all('SELECT d.id,d.name district_name,p.name province_name FROM districts d JOIN provinces p ON p.id=d.province_id ORDER BY p.name,d.name')
             return [{'id': r['id'], 'label': r['province_name'] + ' / ' + r['district_name']} for r in rows]
 
+    # 최근 주제 목록과 검증 Fact 수·초안 수를 반환하여 관리자 목록을 구성합니다.
     def topics(self):
         with self.db.transaction() as tx:
             rows = tx.all('''SELECT t.*,d.name district_name,p.name province_name,
@@ -91,6 +106,7 @@ class NewsService:
                 row['region_name'] = row.pop('province_name') + ' / ' + row.pop('district_name')
             return rows
 
+    # 존재하는 시군구인지 확인한 뒤 주제를 만듭니다. 화면의 가상 지역 ID를 넣으면 안 됩니다.
     def create_topic(self, data, editor):
         with self.db.transaction() as tx:
             need(tx.one('SELECT id FROM districts WHERE id=%s', (data['district_id'],)), '등록된 시군구를 선택하세요.', 422)
@@ -98,11 +114,13 @@ class NewsService:
                               (data['district_id'], data['title'], data['category'], data['is_demo'], editor))
             return {'ok': True, 'id': ident}
 
+    # 현재 주제의 원자료와 사람의 대조에 필요한 필드를 조회합니다.
     def sources(self, topic_id):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id)
             return tx.all('SELECT id,topic_id,source_kind,organization,source_title,source_url,published_at,checked_at,source_excerpt,license_note,is_demo FROM news_sources WHERE topic_id=%s ORDER BY id', (topic_id,))
 
+    # 같은 URL의 중복을 막습니다. 기존 출처를 수정하면 연결 Fact를 후보로 되돌리고 기사도 재검토시킵니다.
     def save_source(self, topic_id, data, editor, source_id=None):
         validate_source(data)
         with self.db.transaction() as tx:
@@ -127,6 +145,7 @@ class NewsService:
                     VALUES(%s,%s,%s,%s,UNHEX(%s),%s,%s,%s,%s,%s,%s,NOW())''', (*values, topic_id, topic['is_demo']))
             return {'ok': True, 'id': ident}
 
+    # Fact가 사용하는 출처는 삭제하지 않습니다. 먼저 근거 연결을 해제해야 합니다.
     def delete_source(self, topic_id, source_id, editor):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -136,6 +155,7 @@ class NewsService:
             tx.execute('DELETE FROM news_sources WHERE id=%s AND topic_id=%s', (source_id, topic_id))
             return {'ok': True}
 
+    # 후보·검증·만료 등 모든 Fact와 연결 출처를 읽어 관리자가 상태를 비교할 수 있게 합니다.
     def facts(self, topic_id):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id)
@@ -144,6 +164,7 @@ class NewsService:
                 row['evidence'] = tx.all('SELECT e.*,s.source_title,s.source_url,s.organization,s.source_excerpt,s.published_at,s.license_note FROM news_fact_evidence e JOIN news_sources s ON s.id=e.source_id WHERE e.fact_id=%s ORDER BY e.source_id', (row['id'],))
             return rows
 
+    # 새 Fact는 candidate입니다. 값을 수정하면 기존 검증·승인을 그대로 이어 쓰지 않습니다.
     def save_fact(self, topic_id, data, editor, fact_id=None):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -160,6 +181,7 @@ class NewsService:
                 ident = tx.insert("INSERT INTO news_facts(fact_key,fact_type,value_text,value_number,unit,event_start,event_end,topic_id,status) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,'candidate')", (*values, topic_id))
             return {'ok': True, 'id': ident, 'status': 'candidate'}
 
+    # 소속 주제부터 확인합니다. 이미 기사에 쓰인 Fact는 이력 보존을 위해 삭제 대신 상태를 바꿉니다.
     def delete_fact(self, topic_id, fact_id, editor):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -172,6 +194,7 @@ class NewsService:
             tx.execute('DELETE FROM news_facts WHERE id=%s AND topic_id=%s', (fact_id, topic_id))
             return {'ok': True}
 
+    # Fact와 출처가 같은 주제인지 검사한 뒤 연결을 저장/해제합니다. 연결 변경도 재검증 대상입니다.
     def evidence(self, topic_id, fact_id, data, editor, delete=False):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -184,6 +207,7 @@ class NewsService:
             tx.execute("UPDATE news_facts SET status='candidate',verified_by=NULL,verified_at=NULL WHERE id=%s", (fact_id,))
             return {'ok': True, 'status': 'candidate'}
 
+    # 사람의 원문 대조를 저장합니다. 연결된 모든 출처가 완전해야 verified로 바꿉니다.
     def verify_fact(self, topic_id, fact_id, data, editor):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -196,6 +220,7 @@ class NewsService:
             tx.execute("UPDATE news_facts SET status='verified',verification_note=%s,verified_by=%s,verified_at=NOW() WHERE id=%s", (data['verification_note'], editor, fact_id))
             return {'ok': True, 'status': 'verified'}
 
+    # Fact를 이견·만료 등으로 바꾸고 그 근거를 쓰는 게시 기사도 중단합니다.
     def fact_status(self, topic_id, fact_id, data, editor):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id, True)
@@ -204,12 +229,14 @@ class NewsService:
             tx.execute('UPDATE news_facts SET status=%s,verification_note=%s,verified_by=NULL,verified_at=NULL WHERE id=%s', (data['status'], data['reason'], fact_id))
             return {'ok': True, 'status': data['status']}
 
+    # 관리자에게 검증 Fact 목록과 현재 근거 해시를 함께 돌려줍니다.
     def fact_sheet(self, topic_id):
         with self.db.transaction() as tx:
             topic = self.topic(tx, topic_id)
             facts, digest = self.sheet(tx, topic)
             return {'topic': topic, 'facts': facts, 'snapshot_hash': digest}
 
+    # 주제 내 수정 번호를 발급하고 기사·당시 근거 JSON·제목/본문 문장·Fact 연결을 한 트랜잭션에 저장합니다.
     def save_article(self, tx, topic, article, digest, editor, model, parent=None):
         revision = tx.one('SELECT COALESCE(MAX(revision_no),0)+1 n FROM news_drafts WHERE topic_id=%s', (topic['id'],))['n']
         facts, actual_digest = self.sheet(tx, topic)
@@ -226,6 +253,7 @@ class NewsService:
                 tx.execute('INSERT INTO news_claim_facts(claim_id,fact_id) VALUES(%s,%s)', (claim_id, keys[key]))
         return {'ok': True, 'id': ident, 'revision_no': revision, 'status': 'generated'}
 
+    # DB에서 검증 근거를 읽은 뒤 연결을 닫고 AI를 호출합니다. 응답 후 다시 잠가 근거 변경을 확인합니다.
     def generate(self, topic_id, editor):
         with self.db.transaction() as tx:
             topic = self.topic(tx, topic_id)
@@ -258,11 +286,13 @@ class NewsService:
             raise NewsError('생성 중 근거가 바뀌어 초안을 폐기했습니다. Fact Sheet 확인 후 다시 생성하세요.')
         return result
 
+    # 같은 주제의 수정본들을 최신 수정 번호 순으로 보여줍니다.
     def drafts(self, topic_id):
         with self.db.transaction() as tx:
             self.topic(tx, topic_id)
             return tx.all('SELECT id,topic_id,parent_draft_id,revision_no,title,model_name,status,is_demo,created_by,created_at,approved_by,approved_at FROM news_drafts WHERE topic_id=%s ORDER BY revision_no DESC', (topic_id,))
 
+    # 현재 검증 자료와 수정본 저장 당시 자료를 함께 반환합니다. 근거가 바뀌었는지도 표시합니다.
     def detail(self, draft_id):
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id)
@@ -275,10 +305,12 @@ class NewsService:
             draft['publication'] = tx.one('SELECT id,status,published_at,unpublished_at,retraction_reason FROM news_publications WHERE draft_id=%s', (draft_id,))
             return draft
 
+    # 사용자가 열어 본 내용 해시와 현재 기사 해시가 다르면 오래된 화면의 요청을 거절합니다.
     def expected(self, draft, value):
         if draft['content_hash'] != value:
             raise NewsError('기사 버전이 바뀌었습니다. 다시 열어 확인하세요.')
 
+    # 기존 본문을 덮어쓰지 않고 부모 초안을 연결한 새 수정본을 만듭니다. 모든 문장은 다시 미검토입니다.
     def edit(self, draft_id, data, editor):
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id, True)
@@ -289,6 +321,7 @@ class NewsService:
             self.review_log(tx, result['id'], 'submitted', editor, '새 수정본 저장: ' + data['reason'], digest)
             return result
 
+    # 사람이 문장 하나를 대조한 결과를 저장합니다. 승인·게시된 기사는 새 수정본으로 검토해야 합니다.
     def check_claim(self, draft_id, claim_id, data, editor):
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id, True)
@@ -305,6 +338,7 @@ class NewsService:
             self.review_log(tx, draft_id, 'submitted', editor, '문장 ' + str(claim['sequence_no']) + ' ' + data['status'] + ': ' + data['note'], digest, draft['content_hash'])
             return {'ok': True, 'status': data['status']}
 
+    # 시연 여부·현재 근거·모든 문장 판정·제목/본문 대응을 검사하는 승인/게시 공통 관문입니다.
     def approvable(self, tx, draft, topic):
         facts, digest = self.sheet(tx, topic)
         if draft['is_demo'] or topic['is_demo']:
@@ -319,6 +353,7 @@ class NewsService:
             raise NewsError('기사 본문과 문장별 근거가 일치하지 않습니다.')
         return digest
 
+    # 최종 승인에는 검토 중 상태와 4개 확인이 필요합니다. 승인 당시 기사·근거 지문을 이력에 남깁니다.
     def review(self, draft_id, data, editor):
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id, True)
@@ -342,6 +377,7 @@ class NewsService:
             self.review_log(tx, draft_id, action, editor, reason, digest, draft['content_hash'])
             return {'ok': True, 'status': 'in_review' if action == 'submitted' else action}
 
+    # 승인 기록이 지금의 내용·근거와 일치할 때만 게시합니다. 이전 게시본 교체도 같은 트랜잭션입니다.
     def publish(self, draft_id, data, editor):
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id, True)
@@ -367,6 +403,7 @@ class NewsService:
             self.review_log(tx, draft_id, 'published', editor, '최종 승인 버전 게시', digest, draft['content_hash'])
             return {'ok': True, 'id': ident, 'status': 'published'}
 
+    # 중단 사유와 이력을 남기고 공개 상태를 해제합니다. 재게시하려면 다시 승인해야 합니다.
     def unpublish(self, draft_id, data, editor):
         with self.db.transaction() as tx:
             draft, _ = self.draft(tx, draft_id, True)
@@ -376,6 +413,7 @@ class NewsService:
             self.review_log(tx, draft_id, 'unpublished', editor, data['reason'], draft['fact_snapshot_sha256'], draft['content_hash'])
             return {'ok': True, 'status': 'unpublished'}
 
+    # 게시·승인·근거를 다시 검사한 기사만 공개합니다. 검증 메모·키·내부 해시는 사용자에게 보내지 않습니다.
     def public(self, district_id=None, publication_id=None, limit=12):
         with self.db.transaction() as tx:
             where = "p.status='published' AND a.status='published' AND a.is_demo=0 AND t.is_demo=0"

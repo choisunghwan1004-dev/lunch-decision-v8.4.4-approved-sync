@@ -1,3 +1,7 @@
+# AI 호출 담당: 사람이 검증한 Fact만 gpt-6-luna에 보내 기사 초안을 받습니다.
+# AI가 사실을 검증하거나 승인·게시하는 코드는 없습니다. 그 단계는 service.py에서 분리합니다.
+# 운영 호출에는 API 키·모델 권한과 비용이 필요하며 테스트는 대역 응답을 사용합니다.
+
 """Generate a draft only. Fact verification and publication are human actions."""
 import json
 import os
@@ -28,6 +32,7 @@ SCHEMA = {
 }
 
 
+# 검증 Fact를 JSON으로 전송하고 엄격한 구조의 초안과 토큰 사용량을 반환합니다. 저장은 서비스가 담당합니다.
 def generate_article(topic, facts, client=None):
     if os.getenv('OPENAI_NEWS_MODEL', MODEL) != MODEL:
         raise ValueError('OPENAI_NEWS_MODEL을 gpt-6-luna로 설정하세요.')

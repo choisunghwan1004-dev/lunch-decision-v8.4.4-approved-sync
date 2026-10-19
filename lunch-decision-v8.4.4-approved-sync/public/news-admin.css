@@ -1,3 +1,6 @@
+/*
+ * 뉴스 관리자와 뉴스 대화상자 전용 스타일입니다. 기존 .card 등 전역 선택자를 덮어쓰지 않도록 범위를 제한합니다.
+ */
 #news .news-toolbar {
   display: flex;
   align-items: center;

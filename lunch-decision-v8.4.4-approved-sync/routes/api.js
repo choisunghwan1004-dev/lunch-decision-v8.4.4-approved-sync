@@ -1,3 +1,8 @@
+/**
+ * 기존 점심·여행·회원·지역·장소·Google 동기화 API 모음입니다.
+ * 읽는 순서: 세션 권한 검사 → 요청값 검사 → MySQL 조회/수정 → JSON 응답입니다.
+ * SQL의 ?는 값 자리이며 실제 값은 배열로 전달합니다. 뉴스 API는 별도 news-proxy.js로 연결합니다.
+ */
 const express=require('express'),bcrypt=require('bcryptjs'),crypto=require('node:crypto');
 const db=require('../db'),{loadTree,sourceLevel,virtual}=require('../lib/tree'),{between}=require('../lib/route');
 const {createPlan,addRouteMetrics}=require('../lib/travel-plan');
@@ -7,11 +12,15 @@ const router=express.Router();
 const pool=()=>db.getPool();
 const query=async(sql,params=[])=>(await pool().query(sql,params))[0];
 const one=async(sql,args=[])=> (await query(sql,args))[0]||null;
+// 관리자 세션이 없으면 401로 차단하고 DB 작업을 실행하지 않습니다.
 function needAdmin(req,res,next){if(!req.session.adminId)return res.status(401).json({message:'관리자 로그인이 필요합니다.'});next();}
+// 회원 전용 조건·이력 API에 적용하는 로그인 검사입니다.
 function needUser(req,res,next){if(!req.session.userId)return res.status(401).json({message:'회원 로그인이 필요합니다.'});next();}
+// 문자열 입력을 숫자로 바꾼 뒤 허용 범위에 들어오는지 검사합니다.
 function numberIn(x,min,max,label){const n=Number(x);if(!Number.isFinite(n)||n<min||n>max)throw bad(`${label}: ${min}~${max} 범위를 입력하세요.`);return n;}
 const encode=(r)=>({id:Number(r.id),name:r.name,category:r.category||'기타',city_name:r.city_name,region_name:r.region_name,country_name:r.country_name,area_name:r.area_name,price_min:r.price_min??0,price_max:r.price_max??0,address:r.address||'',main_menu:r.main_menu||r.category||'',latitude:r.latitude==null?null:Number(r.latitude),longitude:r.longitude==null?null:Number(r.longitude),rating:r.rating==null?null:Number(r.rating),review_count:r.review_count||0,image_path:r.image_path||null,lunch_start:r.lunch_start||'11:00:00',lunch_end:r.lunch_end||'15:00:00',place_type:r.place_type,is_demo:!!r.is_demo,meal_minutes:60,country_code:r.country_code||'KR',phone:r.phone||null,google_place_id:r.google_place_id||null});
 // Google-origin records persist only place ID + reviewed regional FK. Name/address/coords are loaded live.
+// Google Place ID가 있는 장소에 최신 표시 정보를 덧붙입니다. 조회 실패는 원래 레코드와 미확인 상태로 처리합니다.
 async function hydrateGoogle(record){
  if(!record?.google_place_id)return record;
  try{
@@ -21,6 +30,7 @@ async function hydrateGoogle(record){
    google_live:true,google_unavailable:false};
  }catch(e){return {...record,name:'Google 장소 정보 확인 필요',address:'',latitude:null,longitude:null,google_live:false,google_unavailable:true};}
 }
+// 동시에 실행할 외부 조회 수를 제한하고 동일 Place ID는 한 번만 조회합니다.
 async function hydrateSelected(items,maxConcurrency=4){
  const unique=new Map();
  for(const x of items)if(x?.google_place_id&&!unique.has(x.google_place_id))unique.set(x.google_place_id,x);
@@ -33,6 +43,7 @@ async function hydrateSelected(items,maxConcurrency=4){
 
 
 // Administrator: no DDL, no default user inserted on login.
+// 환경 설정의 관리자와 비교해 관리자 세션을 발급합니다. 일반 회원 로그인과 별개입니다.
 router.post('/auth/login',wrap(async(req,res)=>{
  const username=safeText(req.body.username,80),password=String(req.body.password??'');
  const admin=process.env.ADMIN_USERNAME||'admin',pass=process.env.ADMIN_PASSWORD;
@@ -47,6 +58,7 @@ router.post('/auth/login',wrap(async(req,res)=>{
 router.get('/auth/me',(req,res)=>res.json({loggedIn:!!req.session.adminId,username:req.session.adminUsername||null}));
 router.post('/auth/logout',(req,res)=>req.session.destroy(()=>res.json({ok:true})));
 
+// 사용자와 관리자가 함께 쓰는 지역 트리를 조회합니다.
 router.get('/context/locations',wrap(async(req,res)=>res.json(await loadTree(pool()))));
 router.get('/admin/locations/tree',needAdmin,wrap(async(req,res)=>res.json(await loadTree(pool()))));
 router.get('/admin/dashboard',needAdmin,wrap(async(req,res)=>{
@@ -81,6 +93,7 @@ router.get('/admin/locations/diagnostics',needAdmin,wrap(async(req,res)=>{
  result.note='읍·면·동이 있어도 상권이 없을 수 있습니다. DB FK 오류와 데이터 부족을 구분해 표시합니다.';
  res.json(result);
 }));
+// 선택 부모의 실제 테이블/PK를 확인한 뒤 해당 단계의 지역을 등록합니다.
 router.post('/admin/locations',needAdmin,wrap(async(req,res)=>{
  const level=safeText(req.body.level,12),name=safeText(req.body.name,150),virtualParent=req.body.parent_id;
  if(!name)throw bad('지역명을 입력하세요.');
@@ -135,6 +148,7 @@ router.post('/admin/places',needAdmin,wrap(async(req,res)=>{
 }));
 // Google Places: Preview -> individually confirmed review -> inactive save -> explicit activation.
 // Never infer a custom commercial-area boundary from a Google address or coordinates.
+// Google 검색 결과를 잠시 보여주는 단계입니다. 여기서는 DB에 장소를 확정 저장하지 않습니다.
 router.post('/admin/sync-google-places/preview',needAdmin,wrap(async(req,res)=>{
  const areaId=validId(req.body.area_id,'상권');
  const type=String(req.body.place_type||'');
@@ -145,6 +159,7 @@ router.post('/admin/sync-google-places/preview',needAdmin,wrap(async(req,res)=>{
  res.json({ok:true,token,expiresMinutes:10,path:{country:path.country_name,province:path.province_name,district:path.district_name,town:path.town_name,area:path.area_name},place_type:type,results:matches,
   note:'주소의 국가·시도·시군구 검증에 실패한 장소는 승인할 수 없습니다. 읍면동 및 상권의 실제 소속은 관리자가 장소별로 확인해야 합니다. 좌표는 검증하지 않습니다.'});
 }));
+// 미리보기·주소·사람의 확인을 검사하고 신규 장소는 비활성 상태로 저장합니다.
 router.post('/admin/sync-google-places/approve',needAdmin,wrap(async(req,res)=>{
  const areaId=validId(req.body.area_id,'상권');
  const stage=sync.readStage(req.body.token,req.sessionID,areaId);
@@ -197,6 +212,7 @@ router.get('/admin/sync-google-places/pending',needAdmin,wrap(async(req,res)=>{
  const names=new Map(enriched.map(r=>[r.place_id,{name:r.name||'Google 장소',address:r.address||'',live:!!r.google_live}]));
  res.json({ok:true,rows:rows.map(r=>({...r,...(names.get(r.place_id)||{name:'Google 장소 (ID 확인)',address:'',live:false})}))});
 }));
+// 이미 승인한 장소를 재확인하고 활성화합니다. 뉴스 게시 승인과는 다른 기능입니다.
 router.post('/admin/sync-google-places/activate',needAdmin,wrap(async(req,res)=>{
  const areaId=validId(req.body.area_id,'상권');
  if(req.body.confirmation!=='ACTIVATE')throw bad('최종 활성화 확인이 필요합니다.');
@@ -230,11 +246,13 @@ router.post('/admin/sync-google-places/activate',needAdmin,wrap(async(req,res)=>
 router.post('/admin/sync-google-places',needAdmin,(req,res)=>res.status(409).json({message:'관리자 화면에서 상권 선택 → 미리보기 → 장소별 확인 → 비활성 저장 → 최종 활성화 순서로 진행하세요.'}));
 
 // User membership
+// 로그인/가입 뒤 회원 ID를 세션에 저장하는 공통 처리입니다.
 async function sessionUser(req,id){
  await new Promise((resolve,reject)=>req.session.regenerate(e=>e?reject(e):resolve()));
  req.session.userId=id;
  await new Promise((resolve,reject)=>req.session.save(e=>e?reject(e):resolve()));
 }
+// 비밀번호를 해시해 회원을 저장하고 로그인 상태를 연결합니다.
 router.post('/user/register',wrap(async(req,res)=>{
  const username=safeText(req.body.username,80),password=String(req.body.password??''),name=safeText(req.body.name,100);
  if(!/^[A-Za-z0-9가-힣_.-]{3,30}$/.test(username)||password.length<6||!name)throw bad('아이디 3~30자, 비밀번호 6자 이상, 이름이 필요합니다.');
@@ -244,6 +262,7 @@ router.post('/user/register',wrap(async(req,res)=>{
   await sessionUser(req,r.insertId);res.json({ok:true,message:`회원등록 OK — ${name}님, 가입 및 자동 로그인 완료`,user:{id:r.insertId,name}});
  }catch(e){if(e.code==='ER_DUP_ENTRY')throw bad('이미 사용 중인 아이디입니다.',409);throw e}
 }));
+// 저장된 비밀번호 해시를 비교합니다. 평문 비밀번호를 DB에 보관하지 않습니다.
 router.post('/user/login',wrap(async(req,res)=>{
  const username=safeText(req.body.username,80),pass=String(req.body.password??'');
  const user=await one('SELECT id,username,display_name,password_hash FROM users WHERE username=?',[username]);
@@ -259,6 +278,7 @@ router.get('/user/me',wrap(async(req,res)=>{
  WHERE u.id=?`,[req.session.userId]);
  res.json(u?{loggedIn:true,user:u}:{loggedIn:false});
 }));
+// 회원 조건의 실제 상권 연결과 예산·인원·취향을 저장합니다.
 router.put('/user/preferences',needUser,wrap(async(req,res)=>{
  const area=req.body.work_area_id?validId(req.body.work_area_id,'상권'):null;
  let town=null;
@@ -284,6 +304,7 @@ router.get('/user/learning',needUser,wrap(async(req,res)=>{
  res.json({totals:t,categories,reasons});
 }));
 
+// 조건에 맞는 활성 장소를 점수화해 한 곳과 후보를 반환합니다. LLM 생성 기사 API가 아닙니다.
 router.post('/recommendation/today',wrap(async(req,res)=>{
  let area=req.body.area_id?validId(req.body.area_id,'상권'):null;
  let city=req.body.city_id?validId(req.body.city_id,'시군구'):null;
@@ -315,6 +336,7 @@ router.post('/recommendation/today',wrap(async(req,res)=>{
  if(w.google_unavailable)reasons.push('Google 장소 최신 정보 조회 실패: 사용 전 확인 필요');
  res.json({ok:true,winner:{...w,open_now:null,local_time:new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})},reasons,candidates});
 }));
+// 회원의 방문·거절 이력을 남겨 다음 추천 점수에 반영합니다.
 router.post('/recommendation/feedback',needUser,wrap(async(req,res)=>{
  if(!['visited','rejected'].includes(req.body.action))throw bad('방문 또는 거부 중 선택하세요.');
  const place=await one("SELECT id FROM places WHERE id=? AND place_type='restaurant'",[validId(req.body.restaurant_id,'음식점')]);if(!place)throw bad('음식점을 찾을 수 없습니다.',404);
@@ -322,6 +344,7 @@ router.post('/recommendation/feedback',needUser,wrap(async(req,res)=>{
 }));
 
 const cityCoords={서울특별시:[37.5665,126.978],부산광역시:[35.1796,129.0756],전북특별자치도:[35.82,127.15],도쿄도:[35.6762,139.6503],오사카부:[34.69,135.50]};
+// 날씨를 조회합니다. 외부 키가 비어 있거나 실패한 경우도 응답으로 구분합니다.
 router.get('/context/today',wrap(async(req,res)=>{
  const key=process.env.OPENWEATHER_API_KEY;
  if(!key)return res.json({ok:false,weather:'날씨 API 키 없음',kind:'clear',message:'OPENWEATHER_API_KEY 미설정'});
@@ -356,6 +379,7 @@ router.get('/travel/summary',wrap(async(req,res)=>{
  rows.forEach(row=>{counts[row.place_type]=Number(row.n)});
  res.json({ok:true,city_id:district,counts,total:Object.values(counts).reduce((sum,v)=>sum+v,0)});
 }));
+// 기존 장소로 날짜별 일정을 구성해 반환합니다. 현재 일정 테이블에 자동 저장하지 않습니다.
 router.post('/travel/auto-plan',wrap(async(req,res)=>{
  const city=validId(req.body.city_id,'시군구'),days=numberIn(req.body.days??1,1,7,'여행 일수');
  if(!Number.isInteger(days))throw bad('여행 일수는 1~7일의 정수여야 합니다.');
@@ -375,6 +399,7 @@ router.post('/travel/auto-plan',wrap(async(req,res)=>{
  res.json({ok:true,plan:result.plan,days,availability:result.availability,
   ...routes,note});
 }));
+// 연결·FK·키 설정 상태를 진단합니다. 설정 유무와 외부 API 실제 성공을 구분해 읽으세요.
 router.get('/system/check',wrap(async(req,res)=>{
  const tables={};for(const t of ['countries','provinces','districts','admin_towns','town_legal_links','commercial_areas','places','users','user_preferences','lunch_history','migration_mappings'])tables[t]=Number((await one(`SELECT COUNT(*) n FROM ${t}`)).n);
  const orphanTown=Number((await one('SELECT COUNT(*) n FROM admin_towns t LEFT JOIN districts d ON d.id=t.district_id WHERE d.id IS NULL')).n);

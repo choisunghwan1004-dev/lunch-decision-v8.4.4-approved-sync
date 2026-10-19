@@ -1,3 +1,8 @@
+/**
+ * 설치용 DDL 실행기: 01_schema.sql로 새 DB 기본 구조를 만들고 이미 있는 컬럼은 건너뜁니다.
+ * 02_v84_extensions.sql을 그대로 반복 실행하는 대신 SHOW COLUMNS로 필요한 확장만 적용합니다.
+ * 이 자동 생성 스크립트는 V83_DB_NAME=lunch_decision_v83만 허용합니다.
+ */
 require('dotenv').config();
 const fs=require('node:fs'),path=require('node:path'),db=require('../db');
 (async()=>{

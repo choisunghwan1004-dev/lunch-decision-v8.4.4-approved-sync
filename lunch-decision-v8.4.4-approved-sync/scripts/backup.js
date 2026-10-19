@@ -1,3 +1,7 @@
+/**
+ * 기존/신규 DB를 읽기 전용으로 백업합니다. 결과는 SQL이 아니라 압축 NDJSON과 Manifest입니다.
+ * 따라서 MySQL SOURCE로 이 파일을 실행하지 않습니다. SQL 덤프 방식은 README 7절에 별도로 안내합니다.
+ */
 // V8.4 backup: data snapshots from old+target, read-only, gzipped NDJSON, with checksums.
 require('dotenv').config();
 const fs=require('node:fs'),path=require('node:path'),zlib=require('node:zlib'),crypto=require('node:crypto');

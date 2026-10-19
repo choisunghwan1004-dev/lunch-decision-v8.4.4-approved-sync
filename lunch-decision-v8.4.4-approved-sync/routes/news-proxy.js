@@ -1,3 +1,7 @@
+/**
+ * 브라우저와 Python 사이의 중계기입니다. /api/news/topics를 FastAPI의 /topics로 전달합니다.
+ * 브라우저에는 내부 토큰을 주지 않습니다. 관리자 세션·경로·메서드 검사 후 서버가 헤더를 붙입니다.
+ */
 "use strict";
 // Only this server holds the internal key. Existing admin sessions authorize newsroom writes.
 const express = require("express");

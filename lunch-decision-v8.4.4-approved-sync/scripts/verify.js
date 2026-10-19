@@ -1,3 +1,7 @@
+/**
+ * 운영 스키마와 FK 연결·지역/장소 건수를 조회해 이관 및 설치 결과를 확인합니다.
+ * 검사가 통과해도 외부 지도·AI API의 실제 사용 가능 여부까지 확인한 것은 아닙니다.
+ */
 // Read-only verification of FK, duplicate mappings, real descendant traversal and linked samples.
 require('dotenv').config();
 const fs=require('node:fs'),path=require('node:path'),db=require('../db');

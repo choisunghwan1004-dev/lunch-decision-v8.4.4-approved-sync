@@ -1,7 +1,11 @@
+-- 뉴스 신규 테이블 정의입니다. 실제 설치는 python -m news_service.setup --init-env로 실행합니다.
+-- CREATE IF NOT EXISTS는 기존 테이블의 부족한 컬럼을 추가하지 않습니다. Python 설치기의 호환 처리가 필요합니다.
+
 -- V8.5.2 news integration, adapted from feature/v8.5.1-news-center.
 -- Apply through python -m news_service.setup (includes compatibility upgrades).
 -- New tables ONLY in lunch_decision_v83. Never run on lunch_decision.
 
+-- 뉴스 주제입니다. district_id FK는 기존 지역을 재사용하고 is_demo는 운영/시연을 구분합니다.
 CREATE TABLE IF NOT EXISTS news_topics(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  district_id BIGINT UNSIGNED NOT NULL,
@@ -17,6 +21,7 @@ CREATE TABLE IF NOT EXISTS news_topics(
  KEY idx_news_topic_region(district_id,category,status),
  CONSTRAINT fk_news_topic_district FOREIGN KEY(district_id) REFERENCES districts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 출처 URL·기관·공개 시점·관련 구절·이용 조건입니다. URL 해시의 UNIQUE로 주제 내 중복을 막습니다.
 CREATE TABLE IF NOT EXISTS news_sources(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  topic_id BIGINT UNSIGNED NOT NULL,
@@ -35,6 +40,7 @@ CREATE TABLE IF NOT EXISTS news_sources(
  UNIQUE KEY uq_news_source_fingerprint(topic_id,source_url_sha256),
  CONSTRAINT fk_news_source_topic FOREIGN KEY(topic_id) REFERENCES news_topics(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 기사의 사실 항목입니다. 검증 상태·수치·단위·기간을 저장하고 주제 내 Fact Key를 고유하게 유지합니다.
 CREATE TABLE IF NOT EXISTS news_facts(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  topic_id BIGINT UNSIGNED NOT NULL,
@@ -55,6 +61,7 @@ CREATE TABLE IF NOT EXISTS news_facts(
  CONSTRAINT fk_news_fact_topic FOREIGN KEY(topic_id) REFERENCES news_topics(id) ON DELETE RESTRICT,
  CONSTRAINT chk_news_fact_dates CHECK(event_end IS NULL OR event_start IS NULL OR event_end>=event_start)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Fact ↔ 출처의 다대다 연결입니다. 원문의 쪽/문단과 대조 메모도 함께 남깁니다.
 CREATE TABLE IF NOT EXISTS news_fact_evidence(
  fact_id BIGINT UNSIGNED NOT NULL,
  source_id BIGINT UNSIGNED NOT NULL,
@@ -65,6 +72,7 @@ CREATE TABLE IF NOT EXISTS news_fact_evidence(
  CONSTRAINT fk_nfe_fact FOREIGN KEY(fact_id) REFERENCES news_facts(id) ON DELETE RESTRICT,
  CONSTRAINT fk_nfe_source FOREIGN KEY(source_id) REFERENCES news_sources(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 기사 수정본입니다. 부모 수정본과 순번, 기사 본문, 당시 Fact 해시/JSON을 보존합니다.
 CREATE TABLE IF NOT EXISTS news_drafts(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  topic_id BIGINT UNSIGNED NOT NULL,
@@ -86,6 +94,7 @@ CREATE TABLE IF NOT EXISTS news_drafts(
  CONSTRAINT fk_news_draft_topic FOREIGN KEY(topic_id) REFERENCES news_topics(id) ON DELETE RESTRICT,
  CONSTRAINT fk_news_draft_parent FOREIGN KEY(parent_draft_id) REFERENCES news_drafts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 제목은 순번 0, 본문은 1부터 저장합니다. 모든 문장의 검토 상태는 기본 unverified입니다.
 CREATE TABLE IF NOT EXISTS news_claims(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  draft_id BIGINT UNSIGNED NOT NULL,
@@ -98,6 +107,7 @@ CREATE TABLE IF NOT EXISTS news_claims(
  UNIQUE KEY uq_news_claim_sequence(draft_id,sequence_no),
  CONSTRAINT fk_news_claim_draft FOREIGN KEY(draft_id) REFERENCES news_drafts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 문장 ↔ Fact 연결입니다. 기사 본문에서 어느 근거를 사용했는지 추적합니다.
 CREATE TABLE IF NOT EXISTS news_claim_facts(
  claim_id BIGINT UNSIGNED NOT NULL,
  fact_id BIGINT UNSIGNED NOT NULL,
@@ -105,6 +115,7 @@ CREATE TABLE IF NOT EXISTS news_claim_facts(
  CONSTRAINT fk_ncf_claim FOREIGN KEY(claim_id) REFERENCES news_claims(id) ON DELETE RESTRICT,
  CONSTRAINT fk_ncf_fact FOREIGN KEY(fact_id) REFERENCES news_facts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 요청·수정·반려·승인·게시·중단 이력입니다. 승인에는 내용/근거 해시를 함께 저장합니다.
 CREATE TABLE IF NOT EXISTS news_reviews(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  draft_id BIGINT UNSIGNED NOT NULL,
@@ -116,6 +127,7 @@ CREATE TABLE IF NOT EXISTS news_reviews(
  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
  CONSTRAINT fk_news_review_draft FOREIGN KEY(draft_id) REFERENCES news_drafts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- 게시된 수정본과 공개 URL 식별자입니다. 기사 행을 삭제하지 않고 상태와 중단 사유를 남깁니다.
 CREATE TABLE IF NOT EXISTS news_publications(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  topic_id BIGINT UNSIGNED NOT NULL,
@@ -130,6 +142,7 @@ CREATE TABLE IF NOT EXISTS news_publications(
  CONSTRAINT fk_news_pub_topic FOREIGN KEY(topic_id) REFERENCES news_topics(id) ON DELETE RESTRICT,
  CONSTRAINT fk_news_pub_draft FOREIGN KEY(draft_id) REFERENCES news_drafts(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- AI 모델·요청 ID·토큰·성공/실패 기록입니다. 비용 컬럼은 현재 자동 계산하지 않습니다.
 CREATE TABLE IF NOT EXISTS news_ai_usage(
  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
  topic_id BIGINT UNSIGNED NOT NULL,
@@ -148,6 +161,7 @@ CREATE TABLE IF NOT EXISTS news_ai_usage(
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 
+-- Python 설치기가 모든 보정을 마친 뒤 버전을 기록합니다. SQL만 실행해서는 버전 행이 생기지 않습니다.
 CREATE TABLE IF NOT EXISTS news_schema_version(
  name VARCHAR(40) PRIMARY KEY, version VARCHAR(20) NOT NULL,
  applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

@@ -10,13 +10,13 @@ body{background:linear-gradient(135deg,#eef2ff,#f8fafc);color:#172033}.adminwrap
 </style>
 </head>
 <body><main class="adminwrap">
-<section id="login" class="admin-login"><div class="logo">🧭</div><h1>V8.4.4 관리자 센터</h1><p>국가 → 시/도 → 시/군/구 → 읍/면/동 → 리 → 상권 → 음식점</p><input id="username" placeholder="관리자 아이디" value="admin"><input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" style="margin-top:10px"><button class="primary" onclick="login()" style="width:100%;margin-top:14px">관리자 로그인</button><div id="loginMsg" class="status error"></div></section>
+<!-- 기존 관리자 세션 발급 화면입니다. 일반 회원 로그인과 구분됩니다. --><section id="login" class="admin-login"><div class="logo">🧭</div><h1>V8.4.4 관리자 센터</h1><p>국가 → 시/도 → 시/군/구 → 읍/면/동 → 리 → 상권 → 음식점</p><input id="username" placeholder="관리자 아이디" value="admin"><input id="password" type="password" placeholder="비밀번호" autocomplete="current-password" style="margin-top:10px"><button class="primary" onclick="login()" style="width:100%;margin-top:14px">관리자 로그인</button><div id="loginMsg" class="status error"></div></section>
 <section id="app" class="admin-app">
 <header class="admin-head"><div class="head-actions"><button class="home" onclick="location.href='/'">🏠 사용자 화면</button><button class="logout" onclick="logout()">로그아웃</button></div><h1>🧭 V8.4.4 관리자 센터</h1><p>모든 지역 입력을 직접 타이핑하지 않고 단계별 Select로 관리합니다.</p></header>
 <div id="stats" class="stats"></div>
 <div class="tabs"><button onclick="show('location')">📍 지역 관리</button><button onclick="show('restaurant')">🍚 음식점 등록</button><button onclick="show('sync')">🌐 실제 데이터 동기화</button><button onclick="show('places')">🗺 여행 장소</button><button onclick="show('news')">📰 지역 뉴스</button></div>
 
-<section id="location" class="panel active">
+<!-- 공통 지역 계층을 사용합니다. 상위 지역을 바꾸면 하위 선택을 초기화합니다. --><section id="location" class="panel active">
 <div class="card success"><h2>📍 V8 행정구역 선택</h2><p class="hint">앞 단계가 선택되면 다음 단계가 자동으로 열립니다.</p>
 <div class="formgrid"><select id="locCountry"></select><select id="locProvince" disabled></select><select id="locDistrict" disabled></select><select id="locTown" disabled></select><select id="locRi" disabled></select><select id="locArea" disabled></select><input id="locNewName" placeholder="새 지역명(필요할 때만)"><select id="locNewLevel"><option value="country">국가</option><option value="province">시/도</option><option value="district">시/군/구</option><option value="town">읍/면/동</option><option value="ri">리</option><option value="area">상권</option></select><button class="primary" onclick="addLocation()">선택 상위지역에 등록</button></div>
 <div id="locationPath" class="location-path"></div><div id="locationMsg" class="status"></div><button class="primary" style="margin-top:10px" onclick="checkHierarchy()">하위 지역 연결 검사</button><pre id="hierarchyReport" style="white-space:pre-wrap;max-height:320px;overflow:auto"></pre></div>
@@ -29,7 +29,7 @@ body{background:linear-gradient(135deg,#eef2ff,#f8fafc);color:#172033}.adminwrap
 <div class="card"><h3>음식점 목록</h3><div id="restaurantTable" class="tablewrap"></div></div>
 </section>
 
-<section id="sync" class="panel">
+<!-- Google 미리보기 → 사람의 지역 확인 → 비활성 저장 → 최종 활성화 구역입니다. --><section id="sync" class="panel">
  <div class="card sync-box">
   <h2>🌐 지역·상권 확인형 Google Places 동기화</h2>
   <p>① 국가 → ② 시·도 → ③ 시·군·구 → ④ 읍·면·동 → ⑤ 상권 선택 → ⑥ 미리보기 → ⑦ 장소별 확인 후 비활성 저장 → ⑧ 활성화</p>
@@ -55,17 +55,18 @@ body{background:linear-gradient(135deg,#eef2ff,#f8fafc);color:#172033}.adminwrap
 </section>
 
 <section id="places" class="panel"><div class="card"><h2>🗺 관광지·카페·숙박 등록</h2><p class="hint">국가 → 시·도 → 시·군·구 → 읍·면·동 → 상권을 선택한 다음 등록합니다.</p><div class="formgrid"><select id="pCountry"></select><select id="pProvince" disabled></select><select id="pDistrict" disabled></select><select id="pTown" disabled></select><select id="pRi" disabled></select><select id="pArea" disabled></select><select id="pType"><option value="attraction">관광지</option><option value="cafe">카페</option><option value="lodging">숙박</option><option value="restaurant">음식점 (저녁)</option></select><input id="pName" placeholder="장소명"><input id="pAddress" placeholder="주소"><input id="pMin" type="number" placeholder="최저가격"><input id="pMax" type="number" placeholder="최고가격"><input id="pLat" type="number" step="any" placeholder="위도 (선택)"><input id="pLng" type="number" step="any" placeholder="경도 (선택)"><button class="primary" onclick="addPlace()">장소 등록</button></div><div id="placeMsg" class="status"></div></div><div class="card"><h3>여행 장소 목록</h3><div id="placeTable" class="tablewrap"></div></div></section>
-<section id="news" class="panel" aria-label="지역 뉴스 운영">
+<!-- 뉴스 운영 구역입니다. 기존 탭과 독립된 스크립트로 출처·Fact·초안·검토·게시를 연결합니다. --><section id="news" class="panel" aria-label="지역 뉴스 운영">
 <div class="card"><div class="news-toolbar"><div><h2>지역 뉴스 운영</h2><p class="hint">출처 등록 → Fact 원문 대조 → AI 초안 → 문장 검토 → 최종 승인 → 게시</p></div><button type="button" data-news-action="new-topic">새 주제</button></div>
 <p id="newsStatus" role="status" aria-live="polite">뉴스 운영 상태를 확인합니다.</p>
 <label>뉴스 주제<select id="newsTopic"><option value="">주제를 선택하세요</option></select></label>
 <div id="newsWorkspace"></div></div></section>
 </section></main>
-<script>
+<!-- 기존 지역/장소 관리자 로직입니다. 아래 상태 DATA와 선택 컨트롤 ID를 유지합니다. --><script>
 const $=id=>document.getElementById(id);
 const api=async(url,opt={})=>{const r=await fetch(url,opt);const d=await r.json();if(!r.ok)throw Error(d.message+(d.detail?' | '+d.detail:''));return d};
 let DATA={locations:[],restaurants:[],places:[],cities:[]};
 const LEVELS=['country','province','district','town','ri','area'];
+// 선택한 패널만 활성화합니다. 뉴스 패널을 선택하면 독립 뉴스 모듈을 엽니다.
 function show(id){document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');if(id==='news')window.NewsAdmin?.open();}
 function option(v,t,disabled=false){return `<option value="${v}" ${disabled?'disabled':''}>${t}</option>`;}
 function children(parentId,level){return DATA.locations.filter(x=>String(x.parent_id)===String(parentId)&&x.level===level&&x.active!==0);}
@@ -77,6 +78,7 @@ function selectedPath(prefix){return ['Country','Province','District','Town','Ri
 function fillCountries(){const html=option('','국가를 선택하세요')+countryRows().map(x=>option(x.id,`${x.code||''} · ${x.name}`)).join('');['locCountry','rCountry','pCountry','syncCountry'].forEach(id=>$(id).innerHTML=html);resetAfter(['locProvince','locDistrict','locTown','locRi','locArea','rProvince','rDistrict','rTown','rRi','rArea','pProvince','pDistrict','pTown','pRi','pArea','syncProvince','syncDistrict','syncTown','syncRi','syncArea']);
 const cs=countryRows();if(cs.length===1){for(const prefix of ['loc','r','p','sync']){$(prefix+'Country').value=cs[0].id;$(prefix+'Country').dispatchEvent(new Event('change'));}}
 }
+// 국가부터 상권까지 change 이벤트를 연결하고 부모 변경 시 하위 선택을 비웁니다.
 function bindCascade(prefix){
   $(prefix+'Country').addEventListener('change',()=>{const c=Number($(prefix+'Country').value);const ps=children(c,'province');setSelect(prefix+'Province',ps,'시/도를 선택하세요');resetAfter([prefix+'District',prefix+'Town',prefix+'Ri',prefix+'Area']);updatePath(prefix);});
   $(prefix+'Province').addEventListener('change',()=>{const p=Number($(prefix+'Province').value);setSelect(prefix+'District',children(p,'district'),'시/군/구를 선택하세요');resetAfter([prefix+'Town',prefix+'Ri',prefix+'Area']);updatePath(prefix);});
@@ -87,6 +89,7 @@ function bindCascade(prefix){
 }
 function updatePath(prefix){if(prefix==='loc')$('locationPath').innerHTML=selectedPath(prefix).split(' > ').filter(Boolean).map(x=>`<span>${x}</span>`).join('');}
 function selectedLeaf(prefix){const ids=['Country','Province','District','Town','Ri','Area'];for(let i=ids.length-1;i>=0;i--){const v=Number($(prefix+ids[i]).value);if(v)return v;}return null;}
+// 관리자에 필요한 기존 지역·장소·통계를 읽습니다. 뉴스 자료는 별도 모듈에서 읽습니다.
 async function loadAll(){
   DATA.locations=await api('/api/admin/locations/tree');
   DATA.restaurants=await api('/api/admin/restaurants').catch(e=>{console.warn(e);return []});
@@ -135,6 +138,7 @@ function clearSync(){SYNC={token:null,areaId:null,results:[]};$('syncPreview').r
 function syncAreaId(){const row=DATA.locations.find(x=>Number(x.id)===Number($('syncArea').value)&&x.level==='area');return row?.real_id||null;}
 function el(tag,text,props={}){const d=document.createElement(tag);if(text!==null&&text!==undefined)d.textContent=String(text);Object.assign(d,props);return d;}
 function checkbox(role){const x=el('input');x.type='checkbox';x.className='sync-check';x.dataset.role=role;return x;}
+// 현재 선택 경로로 검색 미리보기를 요청합니다. 선택 확인 전에는 장소를 확정 저장하지 않습니다.
 async function previewSync(){
  const areaId=syncAreaId();if(!areaId)return syncStatus('읍·면·동과 상권까지 선택해야 합니다.',true);
  clearSync();const btn=$('syncPreviewBtn');btn.disabled=true;syncStatus('Google Places 장소 목록 조회 중...');
@@ -161,6 +165,7 @@ async function previewSync(){
   syncStatus(`${d.results.length}곳 검색 · ${d.results.filter(x=>x.review.eligible).length}곳 검토 가능 · 지역 불일치는 저장 불가`);
  }catch(e){syncStatus(e.message,true);}finally{btn.disabled=false;}
 }
+// 사람이 확인한 미리보기 항목만 비활성으로 저장하도록 요청합니다.
 async function approveSync(){
  if(!SYNC.token||SYNC.areaId!==syncAreaId())return syncStatus('상권이 변경되었습니다. 다시 검색해 주세요.',true);
  const selected=[...$('syncPreview').querySelectorAll('tr.sync-item')].filter(row=>row.querySelector('[data-role="select"]').checked).map(row=>({id:row.dataset.id,confirmTown:row.querySelector('[data-role="town"]').checked,confirmArea:row.querySelector('[data-role="area"]').checked}));
@@ -185,6 +190,7 @@ async function loadSyncPending(){const areaId=syncAreaId();if(!areaId)return syn
   table.append(tbody);root.append(table);$('syncActivateBtn').disabled=!d.rows.some(x=>!x.active);
  }catch(e){syncStatus(e.message,true)}
 }
+// 승인한 장소를 활성화해 점심/여행 후보에 포함합니다.
 async function activateSync(){const id=syncAreaId();if(!id)return syncStatus('상권을 선택하세요.',true);
  const rows=[...$('syncPending').querySelectorAll('tr[data-place-id]')].filter(row=>row.querySelector('input[data-role="activate"]')?.checked);
  const place_ids=rows.map(row=>Number(row.dataset.placeId));if(!place_ids.length)return syncStatus('활성화할 승인 장소를 체크하세요.',true);
@@ -196,8 +202,10 @@ async function activateSync(){const id=syncAreaId();if(!id)return syncStatus('�
  catch(e){syncStatus(e.message,true);btn.disabled=false;}
 }
 async function checkHierarchy(){try{const d=await api('/api/admin/locations/diagnostics');$('hierarchyReport').textContent=JSON.stringify(d,null,2);}catch(e){$('hierarchyReport').textContent=e.message;}}
+// 환경 설정의 관리자 계정으로 서버 세션을 요청합니다. 비밀번호 비교는 서버에서 수행합니다.
 async function login(){try{await api('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('username').value.trim(),password:$('password').value})});location.reload();}catch(e){$('loginMsg').textContent=e.message;}}
 async function logout(){await api('/api/auth/logout',{method:'POST'});location.reload();}
+// 기존 세션을 확인해 로그인/관리자 영역을 전환합니다. 사용자가 고른 탭은 유지합니다.
 async function init(){try{const me=await api('/api/auth/me');if(!me.loggedIn)return;$('login').style.display='none';$('app').style.display='block';await loadAll();if(!document.querySelector('.panel.active'))show('location');}catch(e){$('loginMsg').textContent=e.message;}}
 bindCascade('loc');bindCascade('r');bindCascade('p');bindCascade('sync');
 ['syncCountry','syncProvince','syncDistrict','syncTown','syncRi','syncArea','syncType'].forEach(id=>$(id).addEventListener('change',clearSync));init();

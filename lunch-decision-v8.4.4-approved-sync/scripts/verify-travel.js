@@ -1,3 +1,7 @@
+/**
+ * 여행에 필요한 장소 종류·샘플 수량·코드의 일정 배분을 검사합니다.
+ * 실제 매장의 최신 가격·영업시간을 검증하는 스크립트는 아닙니다.
+ */
 const db=require('../db');const {createPlan}=require('../lib/travel-plan');
 (async()=>{
  const c=await db.getPool().getConnection();

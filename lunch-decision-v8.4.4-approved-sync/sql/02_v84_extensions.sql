@@ -1,3 +1,6 @@
+-- 확장 컬럼의 참고 SQL입니다. ALTER ADD는 그대로 재실행하면 중복 오류가 날 수 있습니다.
+-- scripts/setup.js가 실제 컬럼을 조회하고 필요한 확장만 추가하므로 npm run setup을 사용하세요.
+
 -- 실행은 npm run setup을 사용하세요. 이 SQL은 신규 DB 확장의 참고 정의이며 재실행 시 중복 오류가 납니다.
 -- 신규 V8.3 DB에만 적용. 기존 lunch_decision은 변경하지 않음.
 USE lunch_decision_v83;
@@ -20,6 +23,7 @@ ALTER TABLE lunch_history
   ADD COLUMN visit_date DATE NULL,
   ADD COLUMN decision_score DECIMAL(8,2) NULL;
 ALTER TABLE lunch_history MODIFY action ENUM('recommended','visited','rejected','accepted') NOT NULL;
+-- 옛 테이블/id와 새 테이블/id의 대응표입니다. 재실행 시 중복 이관과 충돌을 감지합니다.
 CREATE TABLE IF NOT EXISTS migration_mappings (
   legacy_table VARCHAR(60) NOT NULL,
   legacy_id BIGINT UNSIGNED NOT NULL,

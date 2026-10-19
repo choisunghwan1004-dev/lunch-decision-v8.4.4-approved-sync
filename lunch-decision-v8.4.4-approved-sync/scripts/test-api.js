@@ -1,3 +1,7 @@
+/**
+ * 실제 서버+DB가 필요한 점심·여행 통합 검사입니다. 순수 Node 테스트와 실행 조건이 다릅니다.
+ * 이미 실행 중인 서버는 사용하고 직접 시작한 임시 서버만 종료합니다. 시연 지역/장소가 필요합니다.
+ */
 // V8.4.2 — API integration test.
 // Uses PORT from .env, prefers IPv4 127.0.0.1, and automatically starts/stops
 // a temporary V8.4 server if no server is already listening.
