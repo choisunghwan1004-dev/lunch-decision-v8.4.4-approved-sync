@@ -1,0 +1,35 @@
+{
+  "name": "lunch-decision-v8-4-integrated",
+  "version": "8.4.4",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "backup": "node scripts/backup.js",
+    "setup": "node scripts/setup.js",
+    "seed:demo": "npm run seed:base && node scripts/seed-integration.js && npm run seed:travel",
+    "migrate:plan": "node scripts/migrate.js --plan",
+    "migrate:apply": "node scripts/migrate.js --apply",
+    "verify": "node scripts/verify.js",
+    "test:ui": "node --test tests/*.test.js",
+    "start": "node server.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check scripts/migrate.js && node --check scripts/backup.js",
+    "seed:base": "node scripts/seed-demo.js",
+    "test:api": "node scripts/test-api.js",
+    "doctor": "node scripts/doctor.js",
+    "seed:travel": "node scripts/seed-travel-50.js",
+    "verify:travel": "node scripts/verify-travel.js",
+    "test:map": "node --test tests/map-v843.test.js",
+    "setup:sync": "node scripts/setup-google-sync.js",
+    "test:sync": "node --test tests/sync-v844.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "mysql2": "^3.14.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

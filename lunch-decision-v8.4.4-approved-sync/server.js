@@ -1,0 +1,21 @@
+require('dotenv').config();
+const express=require('express'),session=require('express-session'),path=require('node:path');
+const api=require('./routes/api'),app=express();
+app.disable('x-powered-by');
+app.use(express.json({limit:'300kb'}));app.use(express.urlencoded({extended:false}));
+app.use(session({secret:process.env.SESSION_SECRET||'LOCAL_ONLY_CHANGE_ME',resave:false,saveUninitialized:false,cookie:{httpOnly:true,sameSite:'lax',maxAge:4*60*60*1000}}));
+app.use(express.static(path.join(__dirname,'public')));
+app.use('/api',api);
+app.get('/admin',(req,res)=>res.sendFile(path.join(__dirname,'public/admin.html')));
+app.get('/health',async(req,res)=>{try{await require('./db').query('SELECT 1');res.json({ok:true,version:'V8.4.4'})}catch(e){res.status(503).json({ok:false,message:e.message})}});
+app.use((error,req,res,next)=>{
+ console.error('[API]',error.code||'',error.message);
+ const safe=error.status&&error.status<500 ? error.message : error.code==='ER_NO_REFERENCED_ROW_2'?'부모 지역 또는 상권 연결이 잘못되었습니다.':'DB/API 오류가 발생했습니다. PowerShell 서버 로그를 확인하세요.';
+ res.status(error.status||500).json({ok:false,message:safe,code:error.code||null});
+});
+const port=Number(process.env.PORT||3100);
+const server=app.listen(port,'127.0.0.1',()=>{console.log(`V8.4.4 통합: http://127.0.0.1:${port}`);console.log(`관리자: http://127.0.0.1:${port}/admin`)});
+server.on('error',error=>{console.error(`[SERVER] 포트 ${port} 실행 실패 (${error.code||'UNKNOWN'}): ${error.message}`);
+ if(error.code==='EADDRINUSE')console.error('같은 PORT를 사용 중인 다른 서버를 종료하거나 .env의 PORT를 변경하세요.');
+ process.exitCode=1;});
+module.exports=app;
