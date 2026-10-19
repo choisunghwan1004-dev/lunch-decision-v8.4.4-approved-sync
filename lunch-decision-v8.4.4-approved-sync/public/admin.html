@@ -58,6 +58,7 @@ body{background:linear-gradient(135deg,#eef2ff,#f8fafc);color:#172033}.adminwrap
 <!-- 뉴스 운영 구역입니다. 기존 탭과 독립된 스크립트로 출처·Fact·초안·검토·게시를 연결합니다. --><section id="news" class="panel" aria-label="지역 뉴스 운영">
 <div class="card"><div class="news-toolbar"><div><h2>지역 뉴스 운영</h2><p class="hint">출처 등록 → Fact 원문 대조 → AI 초안 → 문장 검토 → 최종 승인 → 게시</p></div><button type="button" data-news-action="new-topic">새 주제</button></div>
 <p id="newsStatus" role="status" aria-live="polite">뉴스 운영 상태를 확인합니다.</p>
+<p><button type="button" data-news-action="ai-check">OpenAI 연결 확인</button> <small>설정 확인은 무료 · 실제 API 테스트는 비용 발생</small></p>
 <label>뉴스 주제<select id="newsTopic"><option value="">주제를 선택하세요</option></select></label>
 <div id="newsWorkspace"></div></div></section>
 </section></main>

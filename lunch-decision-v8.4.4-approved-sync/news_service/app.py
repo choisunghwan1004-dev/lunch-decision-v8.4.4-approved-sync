@@ -14,6 +14,8 @@ from fastapi.responses import JSONResponse
 
 from . import schemas as s
 from .article_ai import MODEL
+from .ai_runtime import NewsAIError, configuration
+from .openai_check import live_check
 from .service import NewsError, NewsService
 
 app = FastAPI(title='V8.4.4 뉴스 운영 API', version='8.5.2', docs_url=None, redoc_url=None, openapi_url=None)
@@ -59,6 +61,24 @@ async def service_error(_, error):
 AUTH = [Depends(auth)]
 
 
+# 원문 API 오류 대신 안전한 코드와 해결 방법을 관리자에게 전달합니다.
+@app.exception_handler(NewsAIError)
+async def ai_error(_, error):
+    return JSONResponse(status_code=error.status, content={'ok': False, 'detail': error.message, 'code': error.code})
+
+
+# DB가 준비되기 전에도 키·모델 설정을 확인할 수 있습니다. 이 GET은 유료 호출이 없습니다.
+@app.get('/ai/status', dependencies=AUTH)
+def ai_status():
+    return configuration()
+
+
+# 관리자만 고정 가상 자료를 전송합니다. DB의 운영 자료·검증·승인 상태를 변경하지 않습니다.
+@app.post('/ai/check', dependencies=AUTH)
+def ai_check(data: s.AICheckInput):
+    return live_check()
+
+
 # 스키마 버전과 키 설정 여부를 확인합니다. 키가 있다는 표시만으로 실제 API 호출 성공을 뜻하지 않습니다.
 @app.get('/health', dependencies=AUTH)
 def health(service: NewsService = Depends(get_service)):
@@ -67,8 +87,8 @@ def health(service: NewsService = Depends(get_service)):
         if not row or row['version'] != '8.5.2':
             raise NewsError('python -m news_service.setup 실행이 필요합니다.', 503)
     return {'ok': True, 'version': '8.5.2', 'model': MODEL,
-            'openaiConfigured': bool(os.getenv('OPENAI_API_KEY')),
-            'modelConfigured': os.getenv('OPENAI_NEWS_MODEL', MODEL) == MODEL}
+            'openaiConfigured': configuration()['key_configured'],
+            'modelConfigured': configuration()['model_configured']}
 
 
 @app.get('/regions', dependencies=AUTH)

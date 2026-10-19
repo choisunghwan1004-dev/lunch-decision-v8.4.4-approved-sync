@@ -268,7 +268,10 @@ class NewsService:
         except Exception as error:
             with self.db.transaction() as tx:
                 self.topic(tx, topic_id, True)
-                tx.execute("INSERT INTO news_ai_usage(topic_id,model_name,status,error_code) VALUES(%s,%s,'error',%s)", (topic_id, article_ai.MODEL, type(error).__name__[:100]))
+                code = error.code if isinstance(error, article_ai.NewsAIError) else type(error).__name__[:100]
+                tx.execute("INSERT INTO news_ai_usage(topic_id,model_name,status,error_code) VALUES(%s,%s,'error',%s)", (topic_id, article_ai.MODEL, code))
+            if isinstance(error, article_ai.NewsAIError):
+                raise
             if isinstance(error, ValueError):
                 raise NewsError(str(error), 422) from error
             raise NewsError('AI 초안 생성에 실패했습니다. 키·모델 권한·한도를 확인하세요. 자동 재시도하지 않았습니다.', 502) from error

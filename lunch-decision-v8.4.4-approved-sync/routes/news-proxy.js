@@ -14,12 +14,14 @@ function createNewsProxy(options = {}) {
     const routes = {
       GET: [
         /^\/health$/,
+        /^\/ai\/status$/,
         /^\/regions$/,
         /^\/topics$/,
         /^\/topics\/[1-9]\d*\/(sources|facts|fact-sheet|drafts)$/,
         /^\/drafts\/[1-9]\d*$/,
       ],
       POST: [
+        /^\/ai\/check$/,
         /^\/topics$/,
         /^\/topics\/[1-9]\d*\/(sources|facts|generate|import)$/,
         /^\/topics\/[1-9]\d*\/facts\/[1-9]\d*\/(evidence|verify|status)$/,

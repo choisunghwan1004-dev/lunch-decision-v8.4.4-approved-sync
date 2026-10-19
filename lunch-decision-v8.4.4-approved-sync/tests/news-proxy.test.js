@@ -36,6 +36,8 @@ test("news proxy restricts private routes, methods and browser writes; keeps sec
   const base = "http://127.0.0.1:" + server.address().port;
   try {
     assert.equal((await fetch(base + "/api/news/topics")).status, 401);
+    assert.equal((await fetch(base + "/api/news/ai/status")).status, 401);
+    assert.equal((await fetch(base + "/api/news/ai/check", {method: "POST"})).status, 401);
     assert.equal(
       (await fetch(base + "/api/news/public?district_id=2&limit=6")).status,
       200,
@@ -82,6 +84,12 @@ test("news proxy restricts private routes, methods and browser writes; keeps sec
     );
     assert.equal(seen.at(-1).options.headers["x-news-editor"], "editor");
     assert.equal(seen.at(-1).url, "http://127.0.0.1:8001/topics");
+    assert.equal((await fetch(base + "/api/news/ai/status", {headers: {cookie}})).status, 200);
+    write.body = JSON.stringify({confirmation: "CALL_OPENAI"});
+    assert.equal((await fetch(base + "/api/news/ai/check", write)).status, 200);
+    assert.equal(seen.at(-1).url, "http://127.0.0.1:8001/ai/check");
+    write.headers.origin = "https://elsewhere.example";
+    assert.equal((await fetch(base + "/api/news/ai/check", write)).status, 403);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

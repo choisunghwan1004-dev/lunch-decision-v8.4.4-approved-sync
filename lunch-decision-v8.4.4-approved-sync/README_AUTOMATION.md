@@ -1,0 +1,194 @@
+# 처음부터 실행하기: OpenAI 실제 호출 + 매일 16시 노션 예약
+
+**Windows 10/11 기준입니다.** 뉴스 모델은 `gpt-6-luna`, DB는 MySQL입니다. 매일 **한국 시간 16:00**에 선택한 운영 주제의 검증 Fact로 기사 초안을 생성하고 노션의 원자료 DB·AI초안 DB에 저장합니다. 노션에는 **검토 대기**로 들어갑니다. 웹 관리자가 수정·승인·게시를 따로 진행합니다.
+
+예약 실행은 이 PC의 Windows 작업 스케줄러가 담당합니다. ChatGPT 앱의 알림 예약이나 노션 자체의 유료 자동화 규칙을 생성하는 방식이 아닙니다. 이 코드를 내려받았다는 사실만으로 예약이 활성화되지는 않습니다. 아래 **16번 예약 등록까지** 마쳐야 합니다.
+
+## 1. ZIP 받기와 폴더 열기
+
+1. [최신 코드 ZIP](https://github.com/choisunghwan1004-dev/lunch-decision-v8.4.4-approved-sync/archive/refs/heads/main.zip)을 내려받습니다.
+2. ZIP을 마우스 오른쪽 버튼으로 눌러 **모두 압축 풀기**를 선택합니다. ZIP 안에서 바로 실행하지 마세요.
+3. 풀린 폴더 안의 `lunch-decision-v8.4.4-approved-sync` 폴더를 엽니다. **`package.json`, `news_service`, `13_OpenAI_키설정.bat`이 함께 보여야** 작업 폴더가 맞습니다.
+4. 기존 프로그램이 있으면 별도 폴더에 풀고 기존 `.env`만 새 폴더로 복사하세요. 기존 `.env`를 예제 파일로 덮어쓰지 마세요.
+
+예시 작업 위치는 `C:\workspace\lunch-news`입니다. 이후 PowerShell 명령은 전부 이 폴더에서 실행합니다. 탐색기 주소창에 `powershell`을 입력하고 Enter를 누르면 그 폴더에서 터미널이 열립니다.
+
+## 2. 필요한 프로그램 확인
+
+- Node.js: 현재 설치된 지원 버전, 프로젝트 요구 `18.18` 이상.
+- Python: 3.11 또는 3.12 권장; 개발 테스트는 3.12에서 확인.
+- MySQL: 8.x. Windows의 **서비스**에서 MySQL 서비스가 실행 중인지 확인하세요.
+- OpenAI API 키, 모델 권한·사용 가능한 API 잔액.
+- 노션 내부 연결 토큰과 뉴스를 저장할 상위 페이지.
+
+```powershell
+node --version
+py -3 --version
+```
+
+명령을 찾을 수 없으면 해당 프로그램을 설치하고 PowerShell을 새로 엽니다. MySQL 명령을 찾을 수 없어도 서버가 설치·실행되어 있다면 이 프로그램은 Python/Node 연결로 동작합니다.
+
+## 3. OpenAI 키 넣기: 13번
+
+`13_OpenAI_키설정.bat`을 더블클릭합니다. 최초에는 설치가 진행됩니다.
+
+1. [OpenAI API Keys](https://platform.openai.com/api-keys)에서 본인의 API 키를 발급받습니다.
+2. 입력 안내가 나오면 키를 붙여 넣고 Enter를 누릅니다. **입력 문자가 화면에 보이지 않는 것이 정상**입니다.
+3. “키와 OPENAI_NEWS_MODEL=gpt-6-luna를 저장했습니다”가 나오면 완료입니다.
+
+키는 이 PC의 `.env`에 저장되며 GitHub 커밋에서 제외합니다. 키를 채팅에 보내지 마세요. ChatGPT 화면에서 모델을 사용할 수 있는지와 본인 API 프로젝트에서 모델을 사용할 수 있는지는 별도로 확인해야 합니다.
+
+## 4. 실제 호출 확인: 14번
+
+`14_OpenAI_실제호출테스트.bat`을 실행합니다. **실제 API 비용이 발생**합니다. 이 단계는 MySQL·노션 없이도 됩니다.
+
+- 성공: `ok: true`, `live_openai_succeeded: true`, `model: gpt-6-luna`와 시연 초안이 표시됩니다.
+- 결과 파일: `test-results\openai-live.json`.
+- `insufficient_quota`: API Billing의 잔액·예산·프로젝트 한도를 확인합니다.
+- `model_access`: API 계정의 모델·Responses 권한을 확인합니다.
+- 자세한 오류는 [OpenAI 실행 안내](README_OPENAI.md)를 보세요.
+
+14번 결과는 연결 시험용 가상 기사입니다. 운영 뉴스 DB나 노션에는 저장하지 않습니다.
+
+## 5. MySQL과 관리자 설정
+
+프로젝트 폴더의 `.env`를 메모장으로 엽니다. 다음 항목을 본인 값으로 설정합니다. **이미 입력된 OPENAI_API_KEY는 그대로 두세요.**
+
+```dotenv
+PORT=3100
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=본인의_MySQL_비밀번호
+OLD_DB_NAME=lunch_decision
+V83_DB_NAME=lunch_decision_v83
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=본인이_정한_관리자_비밀번호
+SESSION_SECRET=32자_이상의_임의_문자열
+```
+
+비밀번호에 공백이나 `#`가 들어 있으면 값 전체를 큰따옴표로 감싸세요.
+
+위 비밀번호·문자열은 설명용입니다. 본인의 실제 값으로 바꾸세요. SESSION_SECRET은 아래 명령으로 나온 무작위 문자열을 복사해서 사용할 수 있습니다.
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### 처음 설치하는 DB
+
+아래 명령을 한 줄씩 실행합니다. 하나가 실패하면 다음 줄로 넘어가기 전에 오류를 해결하세요.
+
+```powershell
+npm ci
+npm run setup
+npm run setup:sync
+npm run seed:demo
+.\.venv\Scripts\python.exe -m news_service.setup --init-env
+```
+
+`seed:demo`는 한국·일본 지역과 가상 장소를 넣어 화면을 확인하는 선택 단계입니다. 실제 영업·행사 데이터가 아닙니다. 등록된 지역이 이미 있으면 생략할 수 있습니다. 기존 설치의 `08_뉴스_설치.bat`은 옛 DB 백업이 필요할 수 있어 신규 설치에서는 위 직접 명령을 사용합니다.
+
+### 이미 뉴스 DB를 사용하고 있다면
+
+기존 데이터를 먼저 백업하고 [README SQL 절차](README.md#7-sql-파일-처리-방법)를 따르세요. 지원되는 옛 뉴스 스키마는 다음과 같이 올립니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m news_service.setup --init-env --upgrade-existing
+```
+
+이 버전의 뉴스 스키마가 준비되어 있으면 04 설치를 반복할 필요 없이 15번에서 추가 예약 테이블만 설치할 수 있습니다. `OLD_DB_NAME`과 `V83_DB_NAME`은 달라야 합니다.
+
+## 6. 서버 시작과 운영 주제 준비: 09번
+
+1. `09_뉴스_서버시작.bat`을 실행합니다. Node 창과 FastAPI 창을 유지합니다.
+2. 브라우저에서 `http://127.0.0.1:3100/admin`을 엽니다.
+3. `.env`의 관리자 아이디·비밀번호로 로그인하고 **지역 뉴스** 탭을 누릅니다.
+4. **새 주제**에서 지역·주제를 등록합니다. 예약할 실제 주제에는 **시연용 가상 자료를 체크하지 않습니다.**
+5. **출처 등록**으로 실제 원자료 URL·기관·공개 시점·관련 구절·이용 조건을 입력합니다.
+6. **Fact 등록 → 근거 연결 → 원문 대조 → 검증 완료**를 진행합니다. Fact 검증은 사람의 작업입니다.
+7. 주제 제목 옆의 **예약 주제 번호 #숫자**를 적어 둡니다. 15번에서 이 번호를 입력합니다. 최대 3개입니다.
+
+샘플 CSV는 시연용이므로 예약 운영 주제에 사용할 수 없습니다. 검증 Fact가 없거나 시연 자료가 포함된 주제는 예약 시 건너뜁니다. 새로운 웹 기사를 자동 검색·본문 수집하는 기능은 포함하지 않습니다. 예약은 **등록·검증한 Fact로 AI 초안을 가져오는 것**입니다. 새로운 뉴스를 만들려면 원자료와 Fact를 갱신하세요.
+
+## 7. 노션 연결: 15번
+
+1. 노션에서 `점심여행 뉴스` 같은 빈 상위 페이지를 하나 만듭니다.
+2. [노션 연결 관리](https://www.notion.so/profile/integrations)에서 내부 연결을 만들고 **Read / Insert / Update Content** 권한을 줍니다.
+3. 만든 상위 페이지의 **연결 추가**에서 그 내부 연결을 연결합니다. 페이지 링크만 복사해도 연결 권한이 자동으로 생기지는 않습니다.
+4. 내부 연결 토큰과 상위 페이지 링크를 준비합니다.
+5. `15_노션_예약설정.bat`을 실행해 순서대로 입력합니다.
+   - 노션 토큰: 입력 문자는 화면에 표시하지 않습니다.
+   - 상위 페이지 링크: 복사한 URL을 붙여 넣습니다.
+   - 운영 주제 번호: 예를 들어 `1` 또는 `1,2,3`.
+6. 완료되면 노션 상위 페이지 아래 **점심여행 원자료 [DB명]**, **점심여행 AI초안 [DB명]** 두 DB가 생성됩니다. 같은 이름이 있으면 재사용합니다.
+
+노션 속성은 `이름(title)`, `자동화키(rich_text)`, `검토상태(select)`입니다. 속성 이름·형식을 바꾸면 전송이 중단될 수 있습니다. 15번은 아직 운영 기사를 생성하지 않습니다. API 토큰과 데이터 소스 ID는 로컬 `.env`에 보관합니다.
+
+## 8. 오후 4시 예약 등록: 16번
+
+`16_오후4시_예약등록.bat`을 실행합니다. Windows 작업 이름은 **LunchTravelNewsDaily1600**입니다. 다시 실행하면 같은 작업의 프로그램 경로·설정을 갱신합니다.
+
+- Windows 시간대는 **서울** 또는 **오사카·삿포로·도쿄**여야 합니다. 두 시간대 모두 UTC+9입니다.
+- `NextRunTime`에 다음 실행 시각이 나타나는지 확인합니다.
+- Windows 검색에서 **작업 스케줄러 → 작업 스케줄러 라이브러리 → LunchTravelNewsDaily1600**을 열어 매일 16:00 트리거를 확인합니다.
+- **PC에 로그인된 상태, 절전 해제, 인터넷·MySQL 실행**이 필요합니다. Node·FastAPI 창은 예약 실행에 필요하지 않습니다.
+- PC가 꺼져 있거나 로그아웃되어 있으면 그 시각의 실행을 보장할 수 없습니다. 같은 날 늦게 실행되면 해당 날짜 작업을 처리하며, 이전 날짜를 자동으로 몰아서 생성하지 않습니다.
+
+2026-10-19 16:00 이후에 등록하면 정상적인 다음 예약은 **2026-10-20 16:00**입니다. 지금 확인하려면 다음 17번을 실행합니다. 시스템이 다른 날짜라면 그 날짜의 다음 16:00을 확인하세요.
+
+## 9. 기다리지 않고 전체 확인: 17번
+
+`17_뉴스_예약즉시실행.bat`을 실행합니다. **실제 OpenAI API 비용과 노션 쓰기가 발생합니다.** 오늘 날짜 작업을 처리하므로 같은 날 16시 예약 또는 17번을 다시 실행해도 같은 주제로 새 기사를 중복 생성하지 않습니다.
+
+정상 처리:
+
+1. MySQL에 미검토 기사·문장별 근거·API 사용량을 저장합니다.
+2. 노션 원자료 DB에 **생성 당시 검증 Fact·출처 스냅샷**을 저장합니다.
+3. 노션 AI초안 DB에 기사·원자료 링크·문장별 Fact Key를 **검토 대기**로 저장합니다.
+4. 결과는 `test-results\news-automation.json`과 MySQL `news_automation_runs`에 남습니다.
+
+| 결과 상태 | 의미 |
+|---|---|
+| `success` | 생성·노션 저장 완료 |
+| `already_done` | 오늘 이미 완료되어 중복 실행 생략 |
+| `waiting_for_verified_facts` | 검증 자료가 없거나 시연 자료 포함; 원자료·Fact부터 확인 |
+| `ai_error` | 키·모델·잔액·응답 오류; `error_code` 확인 |
+| `notion_error` | MySQL 초안은 저장됨; 노션 전송만 다시 실행 |
+| `manual_check_required` | 이전 AI 호출 결과가 불확실하거나 근거·검토 상태 변경; 자동 재과금 방지를 위해 중단 |
+
+노션 전송만 재시도하려면 실행 날짜를 지정합니다. 이 명령은 OpenAI를 다시 호출하지 않습니다.
+
+```powershell
+.\.venv\Scripts\python.exe -m news_service.automation --retry-notion 2026-10-20
+```
+
+`ai_error`·불확실한 호출은 같은 날짜에 자동 재시도하지 않습니다. API 사용량과 관리자 초안을 먼저 확인하고 필요하면 웹의 **검증 Fact로 초안 생성**에서 직접 생성하세요. 노션에서 편집한 내용을 웹 DB로 역동기화하지 않으며, 전송 재시도도 기존 노션 페이지를 덮어쓰지 않습니다.
+
+## 10. 최종 검토·수정·게시
+
+관리자 **지역 뉴스 → 주제 선택 → 기사 검토·수정**에서 제목과 문장마다 원자료를 대조합니다. 수정이 필요하면 새 수정본을 저장하고 다시 검토합니다. 최종 4개 확인 항목을 체크해 승인한 다음 **승인본 게시**를 누릅니다. 예약과 노션 저장은 이 승인 단계를 자동으로 통과하지 않습니다.
+
+사용자 화면은 `http://127.0.0.1:3100/`입니다. 한국·일본의 점심/여행 지역을 선택하면 게시된 지역 기사를 볼 수 있습니다.
+
+## 11. 예약 해제·테스트·SQL
+
+예약을 멈추려면 작업 스케줄러에서 `LunchTravelNewsDaily1600`을 **사용 안 함**으로 바꾸거나, `.env`의 `NEWS_AUTO_ENABLED=0`으로 바꿉니다. 후자는 다음 프로세스 시작부터 적용됩니다.
+
+| 파일 | 확인 범위 |
+|---|---|
+| `10_뉴스_무료테스트.bat` | 유료 API 없이 코드·SDK 대역·노션 대역·시간/중복/복구 검사 |
+| `11_뉴스_MySQL테스트.bat` | 별도 테스트 DB에서 실제 MySQL과 이름 잠금·실행 이력 검사 |
+| `12_뉴스_브라우저테스트.bat` | 등록·검토·게시·일본·모바일·가져오기·OpenAI 설정/결과 화면 (응답 대역) |
+
+SQL 01~04는 [기존 SQL 안내](README.md#7-sql-파일-처리-방법)를 따릅니다. 추가 파일 **`sql/05_news_automation.sql`**은 04 설치 후 15번 설정이 자동 적용합니다. 직접 적용하려면 다음 명령을 실행하세요.
+
+```powershell
+.\.venv\Scripts\python.exe -m news_service.automation --install
+```
+
+예약 이력 테이블은 `run_date + topic_id`가 PK이며 `topic_id`, `draft_id`가 기존 뉴스 테이블 FK입니다. SQL에 DB 비밀번호·API 키를 적지 않습니다. 예약 SQL에는 DROP/DELETE가 없고 반복 설치가 가능합니다. 실행 이력을 지우면 같은 날의 중복 과금 방지가 사라지므로 실패 복구 목적으로 삭제하지 마세요.
+
+**검증의 범위:** 실제 MySQL·Node·브라우저 및 SDK/노션 HTTP 대역 테스트로 확인합니다. 이 개발 환경에는 본인의 API 키·노션 연결 토큰이 없어 실제 유료 호출·노션 쓰기 성공을 검증하지 않았습니다. Windows BAT/작업 등록도 Linux에서는 직접 실행하지 않았습니다. 14번·15번·16번·17번으로 본인 PC에서 확인하세요.
+
+공식 참고: [OpenAI 모델](https://developers.openai.com/api/docs/models/gpt-6-luna) · [Notion DB 생성](https://developers.notion.com/reference/create-database) · [Notion 페이지 생성](https://developers.notion.com/reference/post-page) · [Notion 데이터 소스 조회](https://developers.notion.com/reference/query-a-data-source). 노션 호출은 명시적인 `Notion-Version: 2025-09-03` 계약을 사용합니다.

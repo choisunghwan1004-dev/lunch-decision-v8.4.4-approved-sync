@@ -14,6 +14,11 @@ class Input(BaseModel):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
 
 
+# 진단은 가상 Fact로 실제 API를 한 번 호출합니다. 임의 프롬프트·키 입력을 받지 않습니다.
+class AICheckInput(Input):
+    confirmation: Literal['CALL_OPENAI']
+
+
 # 뉴스가 속한 실제 시군구 PK와 주제·분류·시연 여부를 받습니다.
 class TopicInput(Input):
     district_id: int = Field(gt=0)

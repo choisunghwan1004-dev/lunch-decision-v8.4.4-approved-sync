@@ -1,5 +1,6 @@
 node_modules/
 .env
+.openai-env-*.tmp
 backups/*
 !backups/.gitkeep
 diagnostics/*.json

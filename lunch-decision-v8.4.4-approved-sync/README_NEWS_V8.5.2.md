@@ -1,5 +1,7 @@
 # V8.4.4 + 뉴스 제작·검토·게시 V8.5.2
 
+실제 OpenAI 호출·매일 한국 시간 16시 예약·노션 저장을 시작하려면 [Windows 상세 실행 안내](README_AUTOMATION.md)를 보세요. 신규 실행 파일은 13~17번이며 예약은 별도 SQL 05의 실행 이력으로 같은 날짜·주제 중복을 막습니다.
+
 기존 한국·일본 점심 추천과 여행 화면에 지역 뉴스를 추가합니다. 뉴스 백엔드는 **Python FastAPI + MySQL**, 초안 생성 모델은 **OpenAI `gpt-6-luna`**입니다. AI가 사실 여부를 판정하거나 자동 게시하지 않습니다. 관리자가 원자료를 직접 대조해 Fact를 검증하고, 제목·본문 문장마다 근거를 확인한 뒤 최종 승인과 게시를 따로 수행합니다.
 
 원본: [feature/v8.5.1-news-center](https://github.com/choisunghwan1004-dev/lunch-decision-v8.4.1-api-fixed/tree/feature/v8.5.1-news-center/v84_integrated), 기준 커밋 `d21fc0a3a8b39898b0cc41c04b31406a100e2ca4`. 원본의 출처·Fact 검증 함수, 10개 뉴스 테이블과 내부 프록시 흐름을 V8.4.4에 이식·보강했습니다. 원본의 `gpt-4.1-mini` 기본값은 사용하지 않습니다.

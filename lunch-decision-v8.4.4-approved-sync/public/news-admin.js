@@ -120,6 +120,29 @@
   }
   const submit = (label) =>
     `<button class="news-submit" type="submit">${label}</button>`;
+  // 연결 검사는 주제·DB 기사와 독립적입니다. 키 원문은 브라우저에서 받거나 표시하지 않습니다.
+  async function openAICheck() {
+    const state = await api("/ai/status");
+    const box = modal(
+      "OpenAI 연결 확인",
+      `<p>모델: ${escape(state.model)} · 키 ${state.key_configured ? "설정됨" : "미설정"} · 모델 설정 ${state.model_configured ? "정상" : "확인 필요"}</p><p>키는 PC의 <b>13_OpenAI_키설정.bat</b>으로 입력하고 FastAPI를 다시 시작하세요.</p><p>아래 버튼은 수업용 가상 Fact 1건을 OpenAI에 한 번 전송합니다. API 비용이 발생합니다. 기사 저장·게시는 하지 않습니다.</p><button type="button" data-live-check ${state.key_configured && state.model_configured ? "" : "disabled"}>실제 API 한 번 호출 (유료)</button><pre data-live-result role="status" aria-live="polite">아직 실제 호출하지 않았습니다.</pre>`,
+      null,
+    );
+    const button = box.querySelector("[data-live-check]"),
+      result = box.querySelector("[data-live-result]");
+    button.onclick = async () => {
+      button.disabled = true;
+      result.textContent = "OpenAI 응답을 기다립니다. 자동 재시도하지 않습니다.";
+      try {
+        const checked = await api("/ai/check", "POST", { confirmation: "CALL_OPENAI" });
+        result.textContent = `${checked.message}\n모델: ${checked.model}\n응답 ID: ${checked.usage.request_id}\n입력/출력 토큰: ${checked.usage.input_tokens}/${checked.usage.output_tokens}\n소요: ${checked.elapsed_seconds}초\n\n${checked.article.title}\n${checked.article.body}`;
+      } catch (error) {
+        result.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
+  }
   // 주제 목록을 다시 읽고 현재 선택 주제를 유지합니다.
   async function refresh() {
     topics = await api("/topics");
@@ -148,7 +171,7 @@
       api(`/topics/${active}/drafts`),
     ]);
     el("newsWorkspace").innerHTML =
-      `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
+      `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
  <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="fact-status" data-id="${f.id}">상태 변경</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><div><h3>3. 초안 · 최종 검토 · 게시</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">기사 검토·수정</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
@@ -456,6 +479,7 @@
       id = Number(b.dataset.id) || null;
     try {
       if (action === "new-topic") return newTopic();
+      if (action === "ai-check") return await openAICheck();
       if (!active) return;
       if (action === "import") importForm();
       if (action === "source") sourceForm(id);

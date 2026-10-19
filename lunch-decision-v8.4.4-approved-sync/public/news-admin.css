@@ -206,3 +206,9 @@
     align-items: flex-start;
   }
 }
+/* API 시험 결과와 긴 응답 ID도 휴대폰 대화상자 안에서 줄바꿈합니다. */
+.news-dialog pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}

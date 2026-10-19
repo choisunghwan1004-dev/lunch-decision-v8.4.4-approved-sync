@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | `npm run check` | 통과 | 기존 서버·API·이관 코드와 뉴스 프록시·브라우저 JS 구문 |
 | `npm run test:ui` | 31개 통과 | 기존 점심·여행·지도·지역·Google 승인 로직 29개 + 뉴스 프록시 인증·경로·요청 보호 2개 |
-| Python 기본 테스트 | 36개 통과, MySQL 전용 4개 건너뜀 | 테스트 전용 SQLite 트랜잭션으로 FastAPI·검토·게시 흐름, AI 출력 검증, 환경 설정 보호 |
-| MySQL 8.0.36 통합 테스트 | **40개 통과** | 실제 MySQL에 임시 DB를 생성하여 같은 API 흐름과 구형 스키마 이관 검증 |
+| Python 기본 테스트 | 61개 통과, MySQL 전용 5개 건너뜀 | 테스트 전용 SQLite 트랜잭션으로 FastAPI·검토·게시 흐름, AI 출력 검증, 환경 설정 보호 |
+| MySQL 8.0.36 통합 테스트 | **66개 통과** | 실제 MySQL에 임시 DB를 생성하여 같은 API 흐름과 구형 스키마 이관 검증 |
 | Chromium 134 브라우저 | 통과 | 실제 Node + FastAPI + MySQL에서 관리자 등록부터 게시, 일본 신주쿠 지역 사용자 조회, 모바일 배치·CSV 파일 가져오기 |
 
 Python 3.12, MySQL Connector/Python 9.7.0, OpenAI SDK 2.54.0, FastAPI 0.146.0에서 확인했습니다. Python 테스트에는 Starlette TestClient의 httpx 사용 관련 폐기 예정 경고 1개가 있지만 실패는 없습니다.
@@ -23,3 +23,16 @@ Python 3.12, MySQL Connector/Python 9.7.0, OpenAI SDK 2.54.0, FastAPI 0.146.0에
 모든 DB 통합·브라우저 검증은 별도 `news_test_*` DB에서 수행했습니다. 사용자 운영 DB와 `OLD_DB_NAME`은 사용하지 않았습니다. 테스트 DB는 종료 후 제거하며 운영 서버와 기사 게시를 자동으로 시작하지 않습니다.
 
 CSV JSON 보강 후 추가 검증: CSV BOM과 JSON 수집, 출처 재사용, Fact 후보 저장, 파일 전체 롤백, 파일 내·기존 Fact 중복, 필수값·알 수 없는 필드·행 수 제한, 시연 자료의 운영 주제 유입 차단을 포함합니다. 무료 Python 36개와 MySQL 전용 4개, 합계 40개를 실제 MySQL 8.0.36에서도 실행했습니다. Python `news_service.run_checks`의 offline/mysql/browser 모드로 결과 JSON과 로그 생성을 확인했습니다. Windows BAT 자체는 Linux에서 실행하지 않았습니다.
+
+## OpenAI 실제 호출·16시 노션 예약 추가분
+
+2026-10-19 추가: Python 무료 61개 통과·MySQL 전용 5개 생략, 실제 MySQL 8.0.36에서 전체 66개 통과. Node 31개와 Chromium 사용 흐름도 통과했습니다.
+
+- 실제 OpenAI SDK + httpx MockTransport로 Responses 요청 직렬화·JSON Schema·모델·토큰·재시도 없음·오류 코드(401/403/404/429/400/500/timeout)와 비밀 정보 미노출을 검사했습니다.
+- 키 입력 도우미의 기존 DB/관리자 설정 보존·중복 키 정리·잘못된 키 입력 무변경, 실제 호출 CLI의 실패 JSON을 검사했습니다.
+- API 진단의 내부 인증·명시적 호출 입력·임의 키/프롬프트 입력 거절, Node 세션/Origin 보호와 관리자 설정·결과 팝업을 검사했습니다. 브라우저의 성공 결과는 명시적인 응답 대역입니다.
+- UTC 06:59/07:00 → 한국 15:59/16:00 판단, 같은 날짜·주제 중복 방지, 저장 직후 중단 복구, 불확실한 AI 호출 자동 재시도 금지, 노션만 재시도할 때 AI 키 불필요, 시연 주제 제외·자동 게시 없음, 노션 사전 검사 실패 시 유료 호출 차단을 확인했습니다.
+- 실제 MySQL에서는 SQL 05 반복 설치·다른 DB 연결의 이름 잠금 경쟁·실행 상태 저장·새 RunStore 객체의 재실행 차단을 확인했습니다.
+- 노션 HTTP 대역으로 DB 생성·재사용, 페이지 데이터 소스/속성/블록 크기, 자동화키 조회를 통한 기존 페이지 편집 보존, 오류의 원문 비밀 정보 미노출을 검사했습니다.
+
+미실행: 실제 계정의 유료 OpenAI 호출, 실제 노션 DB/페이지 생성, Windows BAT·작업 스케줄러 등록/정시 실행. 본인 키·토큰과 PC가 필요합니다. 13~17번 실행 순서와 정상 결과는 [Windows 안내](README_AUTOMATION.md)에 있습니다. 기존 제출 Word 문서와 아래의 CSV 단계 기록은 당시 상태를 보존합니다.
