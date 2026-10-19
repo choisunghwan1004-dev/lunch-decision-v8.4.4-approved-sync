@@ -21,7 +21,7 @@ function createNewsProxy(options = {}) {
       ],
       POST: [
         /^\/topics$/,
-        /^\/topics\/[1-9]\d*\/(sources|facts|generate)$/,
+        /^\/topics\/[1-9]\d*\/(sources|facts|generate|import)$/,
         /^\/topics\/[1-9]\d*\/facts\/[1-9]\d*\/(evidence|verify|status)$/,
         /^\/drafts\/[1-9]\d*\/(revisions|review|publish|unpublish)$/,
         /^\/drafts\/[1-9]\d*\/claims\/[1-9]\d*\/review$/,

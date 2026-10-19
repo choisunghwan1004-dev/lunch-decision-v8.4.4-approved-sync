@@ -9,7 +9,7 @@
 | 단계 | 관리자 기능 | 저장·검증 조건 |
 | --- | --- | --- |
 | 주제 선정 | 기존 시군구, 축제·관광·교통·문화·기타 선택 | `districts.id` 연결; 한국·일본 공통 |
-| 출처 등록 | HTTPS 원문 URL, 기관, 제목, 공개 시점, 관련 구절, 이용 조건 등록·수정 | 동일 주제 URL 중복 방지; 서버 자동 크롤링 없음 |
+| 출처 등록 | HTTPS 원문 URL, 기관, 제목, 공개 시점, 관련 구절, 이용 조건 등록·수정 | 동일 주제 URL 중복 방지; 서버 자동 크롤링 없음; CSV·JSON 파일 일괄 수집 지원 |
 | Fact Sheet | 사실 항목·수치·단위·기간 등록, 원문 위치와 근거 구절 연결 | 원문 직접 대조 체크·검증 의견이 있어야 `verified` |
 | AI 초안 | 검증 Fact만 `gpt-6-luna`에 전달 | Responses API, JSON Schema, `store=false`, 자동 재시도 없음 |
 | 문장 검토 | 제목(순번 0)과 각 본문 문장의 Fact·원자료 대조 | AI 결과는 모두 `unverified`; 사람이 일치·불일치 판정 |
@@ -194,3 +194,7 @@ AI 호출은 기본 테스트에서 대역으로 처리하여 실제 비용이 �
 선택 사항: MySQL이 실행 중인 개발 환경에서 브라우저까지 검증하려면 `pip install playwright`, `python -m playwright install chromium`, `python tests/news/browser_smoke.py`를 실행합니다. 별도 `news_test_ui_*` DB에서 Node·FastAPI를 띄우고 종료 후 테스트 DB만 제거합니다. AI는 이 전용 테스트 앱에서만 대역으로 교체하며, 운영 DB 이름이면 테스트 앱 시작을 거부합니다.
 
 이번 구현의 검증 결과는 [검증 기록](NEWS_TEST_REPORT.md)에 정리했습니다.
+
+## CSV JSON 가져오기와 일괄 테스트
+
+추가된 파일 가져오기·무료/DB/브라우저 실행 파일은 [README 실행 안내](README.md#추가-실행-파일과-csv-json-수집)를 따릅니다. 가져온 자료는 검증 대기로만 저장합니다. 시연 파일은 시연용 주제에서만 사용할 수 있으며 운영 게시할 수 없습니다.

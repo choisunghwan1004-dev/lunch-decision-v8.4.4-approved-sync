@@ -1,0 +1,53 @@
+[
+  {
+    "source_kind": "csv",
+    "organization": "수업용 가상 관광 안내소",
+    "source_title": "수업용 가상 지역행사 자료",
+    "source_url": "https://example.org/classroom-tourism-demo",
+    "published_at": "2026-10-19T00:00:00Z",
+    "source_excerpt": "수업용 가상 자료입니다. 2026년 11월 1일 행사, 방문객 120명, 입장료 500엔으로 구성했습니다. 실제 여행에 사용하지 마세요.",
+    "license_note": "수업용으로 직접 작성한 가상 자료",
+    "fact_key": "EVENT_DATE",
+    "fact_type": "date",
+    "value_text": "수업용 가상 행사 일정은 2026년 11월 1일입니다.",
+    "value_number": "",
+    "unit": "",
+    "excerpt_reference": "가상 자료 본문 1문단",
+    "evidence_note": "실제 원자료가 아닌 테스트용 사실 항목",
+    "is_demo": true
+  },
+  {
+    "source_kind": "csv",
+    "organization": "수업용 가상 관광 안내소",
+    "source_title": "수업용 가상 지역행사 자료",
+    "source_url": "https://example.org/classroom-tourism-demo",
+    "published_at": "2026-10-19T00:00:00Z",
+    "source_excerpt": "수업용 가상 자료입니다. 2026년 11월 1일 행사, 방문객 120명, 입장료 500엔으로 구성했습니다. 실제 여행에 사용하지 마세요.",
+    "license_note": "수업용으로 직접 작성한 가상 자료",
+    "fact_key": "VISITOR_COUNT",
+    "fact_type": "number",
+    "value_text": "수업용 가상 방문객 집계는 120명입니다.",
+    "value_number": "120",
+    "unit": "명",
+    "excerpt_reference": "가상 자료 본문 1문단",
+    "evidence_note": "실제 원자료가 아닌 테스트용 사실 항목",
+    "is_demo": true
+  },
+  {
+    "source_kind": "csv",
+    "organization": "수업용 가상 관광 안내소",
+    "source_title": "수업용 가상 지역행사 자료",
+    "source_url": "https://example.org/classroom-tourism-demo",
+    "published_at": "2026-10-19T00:00:00Z",
+    "source_excerpt": "수업용 가상 자료입니다. 2026년 11월 1일 행사, 방문객 120명, 입장료 500엔으로 구성했습니다. 실제 여행에 사용하지 마세요.",
+    "license_note": "수업용으로 직접 작성한 가상 자료",
+    "fact_key": "ENTRY_FEE",
+    "fact_type": "price",
+    "value_text": "수업용 가상 행사 입장료는 500엔입니다.",
+    "value_number": "500",
+    "unit": "엔",
+    "excerpt_reference": "가상 자료 본문 1문단",
+    "evidence_note": "실제 원자료가 아닌 테스트용 사실 항목",
+    "is_demo": true
+  }
+]

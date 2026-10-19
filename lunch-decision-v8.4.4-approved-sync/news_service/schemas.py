@@ -133,3 +133,9 @@ class PublishInput(Input):
 # 게시 중단처럼 이유를 남겨야 하는 작업의 공통 입력입니다.
 class ReasonInput(Input):
     reason: str = Field(min_length=3, max_length=2000)
+
+
+# 파일 내용은 서버의 CSV/JSON 파서에서 행별 SourceInput·FactInput으로 다시 검사합니다.
+class ImportInput(Input):
+    format: Literal['csv', 'json']
+    content: str = Field(min_length=2, max_length=180000)

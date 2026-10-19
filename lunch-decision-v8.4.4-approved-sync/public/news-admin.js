@@ -149,11 +149,22 @@
     ]);
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
- <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
+ <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="fact-status" data-id="${f.id}">상태 변경</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><div><h3>3. 초안 · 최종 검토 · 게시</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">기사 검토·수정</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
   }
   // DB의 실제 시군구를 선택해 새 주제를 등록합니다.
+  // 파일을 브라우저에서 읽어 서버의 CSV/JSON 파서로 보냅니다. 검증·승인은 자동 처리하지 않습니다.
+  function importForm() {
+    modal('CSV·JSON 원자료 가져오기', `<p>예제 파일은 examples 폴더에 있습니다. 시연 자료는 시연용 주제에만 가져올 수 있습니다.</p><label>UTF-8 CSV 또는 JSON 파일<input type="file" name="import_file" accept=".csv,.json" required></label><p>최대 40행·180KB입니다. 같은 Fact Key나 충돌 출처가 있으면 전체 취소합니다. 가져온 Fact는 검증 대기입니다.</p>${submit('파일 가져오기')}`, async (data, form) => {
+      const file=form.querySelector('[name=import_file]').files[0];
+      if(!file || file.size>180000) throw Error('180KB 이하 파일을 선택하세요.');
+      const format=file.name.toLowerCase().endsWith('.csv')?'csv':file.name.toLowerCase().endsWith('.json')?'json':null;
+      if(!format) throw Error('CSV 또는 JSON 파일을 선택하세요.');
+      const result=await api(`/topics/${active}/import`, 'POST', {format,content:await file.text()});
+      status(`${result.facts_created}개 Fact를 가져왔습니다. 원문 대조 후 검증하세요.`);
+    });
+  }
   function newTopic() {
     modal(
       "뉴스 주제 등록",
@@ -446,6 +457,7 @@
     try {
       if (action === "new-topic") return newTopic();
       if (!active) return;
+      if (action === "import") importForm();
       if (action === "source") sourceForm(id);
       if (action === "fact") factForm(id);
       if (action === "evidence") evidenceForm(id);

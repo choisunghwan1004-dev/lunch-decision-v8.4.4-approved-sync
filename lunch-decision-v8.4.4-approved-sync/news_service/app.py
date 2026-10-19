@@ -86,6 +86,13 @@ def new_topic(data: s.TopicInput, who: str = Depends(editor), service: NewsServi
     return service.create_topic(data.model_dump(), who)
 
 
+# CSV·JSON 파일의 모든 행을 검사하고 한 트랜잭션에서 후보 Fact로 저장합니다.
+@app.post('/topics/{topic_id}/import', status_code=201, dependencies=AUTH)
+def import_file(topic_id: int, data: s.ImportInput, who: str = Depends(editor), service: NewsService = Depends(get_service)):
+    from .import_data import import_records
+    return import_records(service, topic_id, data.format, data.content, who)
+
+
 @app.get('/topics/{topic_id}/sources', dependencies=AUTH)
 def sources(topic_id: int, service: NewsService = Depends(get_service)):
     return service.sources(topic_id)

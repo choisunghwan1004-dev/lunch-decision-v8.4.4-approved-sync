@@ -6,9 +6,9 @@
 | --- | --- | --- |
 | `npm run check` | 통과 | 기존 서버·API·이관 코드와 뉴스 프록시·브라우저 JS 구문 |
 | `npm run test:ui` | 31개 통과 | 기존 점심·여행·지도·지역·Google 승인 로직 29개 + 뉴스 프록시 인증·경로·요청 보호 2개 |
-| Python 기본 테스트 | 25개 통과, MySQL 전용 4개 건너뜀 | 테스트 전용 SQLite 트랜잭션으로 FastAPI·검토·게시 흐름, AI 출력 검증, 환경 설정 보호 |
-| MySQL 8.0.36 통합 테스트 | **29개 통과** | 실제 MySQL에 임시 DB를 생성하여 같은 API 흐름과 구형 스키마 이관 검증 |
-| Chromium 134 브라우저 | 통과 | 실제 Node + FastAPI + MySQL에서 관리자 등록부터 게시, 일본 신주쿠 지역 사용자 조회, 모바일 배치 |
+| Python 기본 테스트 | 36개 통과, MySQL 전용 4개 건너뜀 | 테스트 전용 SQLite 트랜잭션으로 FastAPI·검토·게시 흐름, AI 출력 검증, 환경 설정 보호 |
+| MySQL 8.0.36 통합 테스트 | **40개 통과** | 실제 MySQL에 임시 DB를 생성하여 같은 API 흐름과 구형 스키마 이관 검증 |
+| Chromium 134 브라우저 | 통과 | 실제 Node + FastAPI + MySQL에서 관리자 등록부터 게시, 일본 신주쿠 지역 사용자 조회, 모바일 배치·CSV 파일 가져오기 |
 
 Python 3.12, MySQL Connector/Python 9.7.0, OpenAI SDK 2.54.0, FastAPI 0.146.0에서 확인했습니다. Python 테스트에는 Starlette TestClient의 httpx 사용 관련 폐기 예정 경고 1개가 있지만 실패는 없습니다.
 
@@ -21,3 +21,5 @@ Python 3.12, MySQL Connector/Python 9.7.0, OpenAI SDK 2.54.0, FastAPI 0.146.0에
 **실제 OpenAI 유료 API는 호출하지 않았습니다.** AI 어댑터 테스트는 `gpt-6-luna`, Responses API의 엄격한 JSON Schema, 추론 설정, 저장 비활성화, 사용량 파싱과 잘못된 출력 거절을 대역 응답으로 확인했습니다. 실제 계정의 키·모델 권한·청구·기사 품질은 운영 환경에서 초안 생성으로 확인해야 합니다. Google 유료 API와 기존 데이터 이관 전체를 재실행한 결과는 포함하지 않습니다.
 
 모든 DB 통합·브라우저 검증은 별도 `news_test_*` DB에서 수행했습니다. 사용자 운영 DB와 `OLD_DB_NAME`은 사용하지 않았습니다. 테스트 DB는 종료 후 제거하며 운영 서버와 기사 게시를 자동으로 시작하지 않습니다.
+
+CSV JSON 보강 후 추가 검증: CSV BOM과 JSON 수집, 출처 재사용, Fact 후보 저장, 파일 전체 롤백, 파일 내·기존 Fact 중복, 필수값·알 수 없는 필드·행 수 제한, 시연 자료의 운영 주제 유입 차단을 포함합니다. 무료 Python 36개와 MySQL 전용 4개, 합계 40개를 실제 MySQL 8.0.36에서도 실행했습니다. Python `news_service.run_checks`의 offline/mysql/browser 모드로 결과 JSON과 로그 생성을 확인했습니다. Windows BAT 자체는 Linux에서 실행하지 않았습니다.

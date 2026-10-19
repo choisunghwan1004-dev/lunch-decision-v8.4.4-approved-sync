@@ -4,7 +4,7 @@
 
 **문서 기준:** 2026-10-19. 기존 V8.4.4 점심·여행 설계에 뉴스 제작·검토·게시 코드를 통합했습니다. 아래 1~5절은 기존 서비스 설계이며, 뉴스의 기능·화면·DB·수집·환경은 [뉴스 운영 V8.5.2 설계·실행 안내](README_NEWS_V8.5.2.md)에 추가했습니다.
 
-**신규 뉴스:** Python FastAPI · MySQL · `gpt-6-luna`. 기존 뉴스 통합 브랜치의 출처·Fact·초안·문장별 근거 기능을 이식하고, 수정본 저장·사람의 최종 승인·게시·중단·근거 변경 시 승인 해제를 구현했습니다. 관리자 `/admin`의 **지역 뉴스** 탭, 사용자 `/`의 **점심과 여행, 지역 소식**에서 사용합니다. 실제 OpenAI 호출에는 본인의 키와 모델 사용 권한이 필요합니다. [구현 검증 기록](NEWS_TEST_REPORT.md): MySQL 8.0.36 뉴스 테스트 29개, Node 테스트 31개, 관리자·일본 지역·모바일 브라우저 흐름 통과. 실제 OpenAI 유료 호출은 미실행.
+**신규 뉴스:** Python FastAPI · MySQL · `gpt-6-luna`. 기존 뉴스 통합 브랜치의 출처·Fact·초안·문장별 근거 기능을 이식하고, 수정본 저장·사람의 최종 승인·게시·중단·근거 변경 시 승인 해제를 구현했습니다. 관리자 `/admin`의 **지역 뉴스** 탭, 사용자 `/`의 **점심과 여행, 지역 소식**에서 사용합니다. 실제 OpenAI 호출에는 본인의 키와 모델 사용 권한이 필요합니다. [구현 검증 기록](NEWS_TEST_REPORT.md): MySQL 8.0.36 뉴스 테스트 40개, Node 테스트 31개, 관리자·일본 지역·모바일 브라우저 흐름 통과. 실제 OpenAI 유료 호출은 미실행.
 
 - [1. 기능정의서](#1-기능정의서)
 - [2. 화면구성도 및 화면 설계](#2-화면구성도-및-화면-설계)
@@ -380,6 +380,24 @@ npm start
 
 ---
 
+## 추가 실행 파일과 CSV JSON 수집
+
+| 파일 | 사용 순서와 기능 |
+| --- | --- |
+| `08_뉴스_설치.bat` | 기존 V8.4.4 환경에서 뉴스 의존성·DB 준비. 기존 뉴스 구조는 백업 후 `--upgrade-existing` 옵션 사용 |
+| `09_뉴스_서버시작.bat` | FastAPI 8001과 기존 Node 3100 실행 |
+| `10_뉴스_무료테스트.bat` | 가상 환경·개발 의존성 준비 후 Node와 Python 무료 검사. MySQL·AI 키 불필요 |
+| `11_뉴스_MySQL테스트.bat` | 별도 `news_test_*` DB에서 실제 DB·구형 SQL 이관 검사 |
+| `12_뉴스_브라우저테스트.bat` | Chromium에서 실제 관리자·일본 지역·모바일·파일 가져오기 검사 |
+
+서버 실행 후 `/admin` → 지역 뉴스 → **시연용 주제** 생성 → **CSV·JSON 가져오기**에서 `examples/news_demo.csv` 또는 `.json`을 선택하세요. 수업용 가상 Fact 3건과 출처·근거 연결이 저장되며, 원문 대조 전에는 모두 `candidate`입니다. 같은 파일을 다시 가져오면 Fact Key 중복으로 HTTP 409가 되고 일부 행만 저장되지 않습니다.
+
+실제 수집 파일도 같은 열을 사용합니다. 필수 열은 `source_kind, organization, source_title, source_url, published_at, source_excerpt, license_note, fact_key, fact_type, value_text, excerpt_reference, evidence_note, is_demo`입니다. 수치·가격에는 `value_number`가 필요하고 `unit, event_start, event_end`는 선택 사항입니다. `is_demo`는 `true/false` 또는 `1/0`을 명시합니다. UTF-8 CSV 또는 객체 배열 JSON, 최대 40행·브라우저 파일 크기 180KB를 허용합니다. 예제의 `example.org` URL은 실제 수집 기사 출처가 아니며 운영 자료로 사용하지 않습니다.
+
+API는 `POST /api/news/topics/{id}/import`에 `{ "format": "csv", "content": "파일 내용" }`를 받습니다. 관리자 세션과 기존 요청 확인 헤더가 필요합니다. 파일 전체를 검사한 뒤 한 트랜잭션으로 저장하고, 기존 URL의 내용이 다르면 덮어쓰지 않습니다. 이 기능을 위해 추가 SQL 테이블을 생성할 필요는 없습니다.
+
+실행 결과는 `test-results/checks-offline.json`, `checks-mysql.json`, `checks-browser.json`과 같은 이름의 `.log`에 남습니다. 무료 검사는 실제 OpenAI를 호출하지 않습니다. Windows BAT는 Linux에서 직접 실행하지 않았으며, 내부 Python 실행기와 Node·MySQL·브라우저 명령을 검증했습니다.
+
 ## 6. 코드를 읽는 순서와 한국어 주석
 
 바이브코딩으로 작성한 코드를 직접 확인할 수 있도록 서버·DB·화면·설치 스크립트와 SQL에 한국어 주석을 추가했습니다. 주석은 함수가 **무엇을 입력받아 어디에 저장하고 무엇을 반환하는지**, 검증·트랜잭션·승인 차단이 **왜 필요한지** 설명합니다. 기존 UI·State·선택자·실행 로직을 유지했습니다.
@@ -493,7 +511,7 @@ npm run test:ui
 .\.venv\Scripts\python.exe -m pytest tests/news -q
 ```
 
-현재 기준 Node 31개, Python 기본 25개가 통과하며 MySQL 전용 4개는 기본 실행에서 건너뜁니다. 기본 Python 검사는 테스트 전용 SQLite 대역을 쓰지만 운영 DB는 MySQL입니다. AI 응답은 대역이므로 무료 테스트의 통과가 실제 OpenAI API 호출·모델 권한·청구 성공을 의미하지 않습니다.
+현재 기준 Node 31개, Python 기본 36개가 통과하며 MySQL 전용 4개는 기본 실행에서 건너뜁니다. 기본 Python 검사는 테스트 전용 SQLite 대역을 쓰지만 운영 DB는 MySQL입니다. AI 응답은 대역이므로 무료 테스트의 통과가 실제 OpenAI API 호출·모델 권한·청구 성공을 의미하지 않습니다.
 
 ### 8.2 DB와 서버가 필요한 테스트
 
