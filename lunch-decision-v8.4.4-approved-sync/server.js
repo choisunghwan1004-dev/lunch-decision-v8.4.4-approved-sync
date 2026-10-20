@@ -10,11 +10,15 @@ app.disable('x-powered-by');
 app.use(express.json({limit:'300kb'}));app.use(express.urlencoded({extended:false}));
 app.use(session({secret:process.env.SESSION_SECRET||'LOCAL_ONLY_CHANGE_ME',resave:false,saveUninitialized:false,cookie:{httpOnly:true,sameSite:'lax',maxAge:4*60*60*1000}}));
 // public 파일은 화면·스타일·브라우저 코드입니다. 비밀 환경설정은 public 아래 두지 않습니다.
-app.use(express.static(path.join(__dirname,'public')));
+// HTML·뉴스 자산을 매번 다시 읽어 업데이트 후 옛 제목·지역 버튼이 캐시에서 남지 않게 합니다.
+// 다른 이미지·점심/여행 스크립트의 기존 캐시 설정은 Express 기본값을 사용합니다.
+app.use(express.static(path.join(__dirname,'public'),{setHeaders(res,file){
+ if(file.endsWith('.html') || /[\\/]news-[^\\/]+\.(?:js|css)$/.test(file)) res.set('Cache-Control','no-store');
+}}));
 // 뉴스 전용 경로를 먼저 연결해야 뒤의 기존 /api 라우터와 역할이 섞이지 않습니다.
 app.use('/api/news',require('./routes/news-proxy')());
 app.use('/api',api);
-app.get('/admin',(req,res)=>res.sendFile(path.join(__dirname,'public/admin.html')));
+app.get('/admin',(req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'public/admin.html')));
 app.get('/health',async(req,res)=>{try{await require('./db').query('SELECT 1');res.json({ok:true,version:'V8.4.4'})}catch(e){res.status(503).json({ok:false,message:e.message})}});
 // 권한/입력 오류만 자세히 보여 주고 내부 DB 오류는 화면용 안내로 정리합니다.
 app.use((error,req,res,next)=>{

@@ -10,7 +10,7 @@ function createNewsProxy(options = {}) {
   const router = express.Router();
   router.use(async (req, res) => {
     const publicRead =
-      req.method === "GET" && /^\/public(?:\/[1-9]\d*)?$/.test(req.path);
+      req.method === "GET" && /^\/public(?:\/[1-9]\d*|\/feed|\/facts\/[1-9]\d*)?$/.test(req.path);
     const routes = {
       GET: [
         /^\/health$/,

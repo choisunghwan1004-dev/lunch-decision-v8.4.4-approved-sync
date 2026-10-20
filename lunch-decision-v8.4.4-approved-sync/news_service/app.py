@@ -238,6 +238,17 @@ def public(district_id: int | None = Query(None, gt=0), limit: int = Query(12, g
     return service.public(district_id=district_id, limit=limit)
 
 
+# 고정 경로를 /public/{publication_id}보다 먼저 선언하여 'feed'를 기사 ID로 해석하지 않게 합니다.
+@app.get('/public/feed', dependencies=AUTH)
+def public_feed(district_id: int | None = Query(None, gt=0), limit: int = Query(30, ge=1, le=30), service: NewsService = Depends(get_service)):
+    return service.public_feed(district_id=district_id, limit=limit)
+
+
+@app.get('/public/facts/{topic_id}', dependencies=AUTH)
+def public_facts(topic_id: int, service: NewsService = Depends(get_service)):
+    return service.public_facts(topic_id=topic_id)
+
+
 @app.get('/public/{publication_id}', dependencies=AUTH)
 def public_detail(publication_id: int, service: NewsService = Depends(get_service)):
     return service.public(publication_id=publication_id)

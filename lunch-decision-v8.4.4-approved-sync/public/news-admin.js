@@ -117,6 +117,8 @@
       error.status = response.status;
       throw error;
     }
+    // Fact 검증·내용 수정·근거 해제·삭제도 메인 표시를 바꾸므로 모든 성공한 쓰기를 알립니다.
+    if (method !== "GET") notifyPublic();
     return result;
   }
   // 입력/검토 팝업을 만들고 저장 중 중복 클릭·실패 안내·저장 후 목록 갱신을 공통 처리합니다.
@@ -222,9 +224,10 @@
     const published = drafts.filter(d => d.status === "published").length;
     const nextStep = topic.is_demo ? "시연용 주제는 운영 화면에 게시할 수 없습니다."
       : published ? "검증·저장이 완료되어 메인 지역 소식에 표시됩니다."
+      : topic.publication_count ? "이전에 공개한 기사가 중단된 주제입니다. 기사 원문 비교·검증에서 다시 저장해야 공개됩니다."
+      : verified ? "검증한 Fact가 메인 지역 소식에 표시됩니다. AI 기사 생성은 선택이며 초안은 별도 검증 후 공개됩니다."
       : drafts.some(d => d.status === "approved") ? "이전에 승인한 기사입니다. 원문 비교·검증에서 확인 후 저장하면 지역 소식에 표시됩니다."
       : drafts.length ? "기사가 저장되었습니다. 원문 비교·검증에서 확인 후 검증 완료·저장을 누르세요."
-      : verified ? "Fact 검증이 저장되었습니다. 초안을 만든 뒤 원문 비교·검증에서 저장하세요."
       : "출처와 Fact를 저장한 뒤 원문 대조로 Fact를 검증하세요.";
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
@@ -365,7 +368,7 @@
     const f = facts.find((x) => Number(x.id) === id);
     modal(
       "Fact 원문 대조 · 사람의 검증",
-      `${evidenceHTML(f)}<label class="news-check"><input type="checkbox" name="editor_confirmed" required>원문을 직접 열어 수치·날짜·지역·표현을 대조했습니다.</label>${text("verification_note", "검증 메모 (선택)", "", 'maxlength="4000"')}${submit("Fact 검증 완료")}`,
+      `${evidenceHTML(f)}<p>운영용 주제는 검증 완료 후 Fact 내용과 출처가 메인 지역 소식에 표시됩니다. 시연용 주제는 공개하지 않습니다. 기존 기사 게시 이력이 있는 주제는 기사를 다시 검증·저장하세요.</p><label class="news-check"><input type="checkbox" name="editor_confirmed" required>원문을 직접 열어 수치·날짜·지역·표현을 대조했습니다.</label>${text("verification_note", "검증 메모 (선택)", "", 'maxlength="4000"')}${submit("Fact 검증 완료")}`,
       async (data) => {
         await api(`/topics/${active}/facts/${id}/verify`, "POST", {
           editor_confirmed: data.has("editor_confirmed"),
@@ -392,7 +395,6 @@
       await api(`/drafts/${id}/verify-and-save`, "POST", {
         source_checked: true, note: data.get("note") || "", expected_content_hash: d.content_hash,
       });
-      notifyPublic();
     });
     if (!saved && !canSave) current.querySelector('[type="submit"]').disabled = true;
     // 확인 누락 안내는 체크한 즉시 지워, 체크했는데도 오류가 남아 보이지 않게 합니다.
@@ -405,7 +407,7 @@
       stop.disabled = true;
       try {
         await api(`/drafts/${id}/unpublish`, "POST", {reason: "관리자가 지역 소식 공개를 중단했습니다."});
-        notifyPublic(); current.close(); await refresh(); status("공개를 중단했습니다.");
+        current.close(); await refresh(); status("공개를 중단했습니다.");
       } catch (error) { current.querySelector(".news-error").textContent = error.message; stop.disabled = false; }
     };
   }

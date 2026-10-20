@@ -1,5 +1,32 @@
 # 뉴스 통합 검증 기록
 
+<a id="news-fact-feed-verification"></a>
+
+## 2026-10-20 추가·변경 검증 — Fact 공개와 기사 저장
+
+| 변경 항목 | 변경 전 | 변경 후·확인 결과 |
+| --- | --- | --- |
+| 메인 소식 | 최종 게시 기사만 조회 | 검증 Fact도 AI 없이 조회, 같은 주제는 기사로 교체 |
+| 검증 UI | 여러 검토·승인·게시 조작 | 확인 1개·빈 메모 기사 저장, 상태 변경 항목 없음 |
+| 화면 적용 | 이전 제목·지역 버튼 여부 불분명 | 파일/제공 HTML 표시·캐시·이전 Python 오류 확인 |
+
+| 실제 실행 검사 | 결과 | 범위 |
+| --- | --- | --- |
+| MySQL 8.0.36 뉴스 전체 검사 | **98개 통과** | 기존 업무·구형 이관·간편 저장·Fact 피드 13개 추가 사례 포함 |
+| Node `npm run test:ui` | **36개 통과** | 한국·일본 점심/여행·지도·승인 동기화·뉴스 프록시·문서 생성 |
+| `npm run check` | 통과 | JS 구문 및 README 사전 생성 |
+| README 최신 검사 | 통과 | 자동 구역과 실행 GIF 기록 일치·재실행 시 차이 없음 |
+| Chromium + 실제 Node/FastAPI/MySQL | 통과 | 검증 전 미노출, Fact 검증/수정/재검증 자동 반영, 출처, 기사 교체, 중단 후 Fact 미복귀, 일본·390px 모바일 |
+| 공개 API·캐시 | 통과 | 새 피드/Fact 상세 인증 경계, HTML·뉴스 자산 no-store, 이전 서버 422 안내 |
+
+실제 코드: [Fact 피드 테스트](tests/news/test_public_facts.py), [기사 저장](tests/news/test_simple_review.py), [브라우저 검사](tests/news/browser_smoke.py). 실행 GIF: [7단계 녹화](docs/assets/news-publication-demo.gif). [1~5 형식 변경 보고서](docs/NEWS_CHANGE_2026-10-20.md).
+
+검사 환경: Linux, Node.js 24.19.0, Python 3.12.14, MySQL 8.0.36, Chromium 134.0.6998.35. DB는 격리된 임시 `news_test_*`이고 AI 생성은 명시적인 대역이다. Fact 공개 경로는 AI를 호출하지 않는다. TestClient의 httpx 관련 폐기 예정 경고 1개가 있었으며 실패는 없다.
+
+**미실행:** 실제 유료 OpenAI·노션 요청, 사용자 운영 DB 검사, Windows BAT·작업 스케줄러 등록과 정시 실행. 실제 PC 적용은 최신 코드 → 두 서버 종료 → 09번 실행 → Ctrl+F5 순서다. 추가 SQL은 없다.
+
+## 이전 검증 기록 (당시 구현 기준)
+
 2026-10-19, V8.4.4 + 뉴스 운영 V8.5.2 소스 기준.
 
 | 검증 | 결과 | 범위 |

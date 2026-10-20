@@ -25,6 +25,8 @@ test('현재 소스의 API·테이블·자료를 읽고 수동 README 구역을 
   assert.ok(output.endsWith('\n수동 꼬리말\n'));
   assert.match(output, /POST \/drafts\/\{draft_id\}\/publish/);
   assert.match(output, /news_claim_facts/);
+  assert.match(output, /GET \/public\/feed/);
+  assert.match(output, /기사 생성 없이 원문 검증 소식/);
   assert.match(output, /Fact 후보/);
   assert.match(output, /jongno_events_20261020.json/);
   assert.match(output, /URL 자동 수집은 구현되어 있지 않습니다/);

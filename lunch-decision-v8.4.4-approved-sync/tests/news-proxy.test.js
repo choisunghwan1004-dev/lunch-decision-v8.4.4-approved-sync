@@ -44,6 +44,13 @@ test("news proxy restricts private routes, methods and browser writes; keeps sec
       200,
     );
     assert.equal((await fetch(base + "/api/news/public/1")).status, 200);
+    assert.equal((await fetch(base + "/api/news/public/feed?limit=30")).status, 200);
+    assert.equal(seen.at(-1).url, "http://127.0.0.1:8001/public/feed?limit=30");
+    const facts = await fetch(base + "/api/news/public/facts/1");
+    assert.equal(facts.status, 200);
+    assert.equal(facts.headers.get("cache-control"), "no-store");
+    assert.equal((await fetch(base + "/api/news/public/facts/1", {method:"POST"})).status, 401);
+    assert.equal((await fetch(base + "/api/news/public/facts/1/evidence")).status, 401);
     assert.equal(
       (await fetch(base + "/api/news/public?token=anything")).status,
       422,

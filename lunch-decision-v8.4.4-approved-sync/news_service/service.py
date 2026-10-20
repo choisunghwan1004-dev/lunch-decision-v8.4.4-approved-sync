@@ -9,7 +9,7 @@ import json
 
 from . import article_ai
 from .db import Database
-from .validation import can_verify, complete_evidence, content_hash, fingerprint, parse_draft, snapshot, validate_source
+from .validation import can_verify, complete_evidence, content_hash, fingerprint, parse_draft, snapshot, validate_fact, validate_source
 
 
 # 처리할 수 없는 업무 상태를 예외로 전달합니다. 앱은 이를 상태 코드와 한글 안내로 변환합니다.
@@ -100,6 +100,7 @@ class NewsService:
             rows = tx.all('''SELECT t.*,d.name district_name,p.name province_name,
                 (SELECT COUNT(*) FROM news_facts f WHERE f.topic_id=t.id AND f.status='verified') verified_count,
                 (SELECT COUNT(*) FROM news_drafts a WHERE a.topic_id=t.id) draft_count
+                ,(SELECT COUNT(*) FROM news_publications p WHERE p.topic_id=t.id) publication_count
                 FROM news_topics t JOIN districts d ON d.id=t.district_id JOIN provinces p ON p.id=d.province_id
                 ORDER BY t.id DESC LIMIT 100''')
             for row in rows:
@@ -486,3 +487,62 @@ class NewsService:
             if publication_id:
                 return need(output, '게시된 기사를 찾지 못했습니다.')[0]
             return output
+
+    # 기사 생성 없이도 사람이 확인한 Fact를 지역 소식으로 읽을 수 있게 합니다.
+    # 같은 주제의 Fact를 한 카드로 묶고, 공개에 필요한 값·출처만 선택합니다.
+    # 한 번이라도 기사로 게시한 주제는 기사 경로로 관리합니다. 공개 중단 후 Fact로 다시 나타나면 안 됩니다.
+    def public_facts(self, district_id=None, topic_id=None, limit=30):
+        with self.db.transaction() as tx:
+            where = """t.is_demo=0 AND f.status='verified' AND f.verified_at IS NOT NULL
+                AND NOT EXISTS(SELECT 1 FROM news_publications p WHERE p.topic_id=t.id)"""
+            args = []
+            for column, value in (('t.district_id', district_id), ('t.id', topic_id)):
+                if value is not None:
+                    where += ' AND ' + column + '=%s'
+                    args.append(value)
+            rows = tx.all('''SELECT t.id,MAX(f.verified_at) last_verified
+                FROM news_topics t JOIN news_facts f ON f.topic_id=t.id WHERE ''' + where +
+                ' GROUP BY t.id ORDER BY last_verified DESC,t.id DESC LIMIT 100', tuple(args))
+            output = []
+            for row in rows:
+                topic = self.topic(tx, row['id'])
+                facts, _ = self.sheet(tx, topic)
+                visible = []
+                for fact in facts:
+                    try:
+                        validate_fact(fact)
+                    except ValueError:
+                        continue
+                    # 검증자·시각이 없는 구형 상태값, 시연 출처, 직접 바뀐 출처 원문은 공개하지 않습니다.
+                    if (not fact['verified_by'] or not fact['verified_at']
+                            or not str(fact['verification_note'] or '').strip()
+                            or any(e['is_demo'] or e['content_sha256'] != hashlib.sha256(e['source_excerpt'].encode()).hexdigest()
+                                   for e in fact['evidence'])):
+                        continue
+                    visible.append(fact)
+                if not visible:
+                    continue
+                sources = {}
+                for fact in visible:
+                    for evidence in fact['evidence']:
+                        sources[evidence['source_id']] = {
+                            'id': evidence['source_id'], **{key: evidence[key] for key in
+                                ('source_title', 'organization', 'source_url', 'published_at')}}
+                body = '\n\n'.join(f['value_text'] for f in visible)
+                output.append({'id': topic['id'], 'kind': 'facts', 'title': topic['title'],
+                    'summary': body[:280] + ('…' if len(body) > 280 else ''), 'body': body,
+                    'district_id': topic['district_id'], 'region_name': topic['region_name'],
+                    'category': topic['category'], 'published_at': max(f['verified_at'] for f in visible),
+                    'sources': list(sources.values()), 'fact_count': len(visible), 'ai_assisted': False})
+            # 불완전한 Fact를 제외한 실제 공개 시각으로 정렬한 다음 개수 제한을 적용합니다.
+            output.sort(key=lambda item: (str(item['published_at']), item['id']), reverse=True)
+            if topic_id is not None:
+                return need(output, '공개할 검증 Fact를 찾지 못했습니다.')[0]
+            return output[:limit]
+
+    # 기존 /public 기사용 API는 그대로 두고, 새 메인 피드에서 두 종류를 함께 조회합니다.
+    # 기사와 Fact의 ID는 서로 다른 테이블이므로 kind와 id를 함께 사용해야 합니다.
+    def public_feed(self, district_id=None, limit=30):
+        articles = [{**a, 'kind': 'article'} for a in self.public(district_id=district_id, limit=limit)]
+        facts = self.public_facts(district_id=district_id, limit=limit)
+        return sorted(articles + facts, key=lambda item: (str(item['published_at']), item['kind'], item['id']), reverse=True)[:limit]

@@ -199,12 +199,51 @@ def main():
             dialog.locator('[name=evidence_note]').fill('행사 일정 원문과 대조')
             dialog.get_by_role('button', name='연결 저장').click()
             expect(page.locator('dialog:visible')).to_have_count(0)
+            # 이미 열린 메인도 Fact 검증·수정 알림을 받아 다시 조회해야 합니다. AI는 아직 호출하지 않습니다.
+            public_page = context.new_page()
+            public_page.goto(base + '/')
+            expect(public_page.locator('#regionalNews h2')).to_have_text('지역 소식')
+            expect(public_page.locator('#regionalNews')).to_have_attribute('data-news-view', 'verified-facts-v1')
+            expect(public_page.locator('[data-news-mode]')).to_have_count(0)
+            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('검증된 지역 소식이 아직 없습니다')
+            for asset in ('/', '/admin', '/news-public.js', '/news-admin.js'):
+                assert public_page.request.get(base + asset).headers['cache-control'] == 'no-store'
+            public_page.locator('#regionalNews').scroll_into_view_if_needed()
+            capture_publication(public_page, '지역 소식 1/7 · 검증 전 Fact 후보는 공개하지 않습니다')
             page.get_by_role('button', name='원문 대조', exact=True).click()
             dialog = page.locator('dialog:visible')
             dialog.locator('[name=editor_confirmed]').check()
             dialog.locator('[name=verification_note]').fill('원자료 날짜 및 지역 대조 완료')
             dialog.get_by_role('button', name='Fact 검증 완료', exact=True).click()
             expect(page.locator('dialog:visible')).to_have_count(0)
+            expect(page.locator('#newsWorkspace')).to_contain_text('AI 기사 생성은 선택')
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 행사 소식')
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('2026년 11월 1일')
+            public_page.locator('#regionalNews').scroll_into_view_if_needed()
+            capture_publication(public_page, '지역 소식 2/7 · AI 생성 없이 검증 Fact가 메인에 반영됩니다')
+            public_page.get_by_role('button', name='소식 읽기 ↗').click()
+            expect(public_page.locator('dialog:visible')).to_contain_text('브라우저 테스트 원자료')
+            capture_publication(public_page, '지역 소식 3/7 · 검증된 사실과 원문 출처 확인')
+            public_page.locator('dialog:visible').get_by_role('button', name='닫기', exact=True).click()
+            # Fact를 수정하면 후보로 돌아가므로 열린 메인에서도 빠집니다. 빈 메모 재검증도 확인합니다.
+            page.locator('[data-news-action="fact"][data-id]').click()
+            page.locator('dialog:visible').get_by_role('button', name='Fact 저장', exact=True).click()
+            expect(page.locator('dialog:visible')).to_have_count(0)
+            expect(public_page.locator('#regionalNewsCards article')).to_have_count(0)
+            page.get_by_role('button', name='원문 대조', exact=True).click()
+            page.locator('dialog:visible [name=editor_confirmed]').check()
+            page.locator('dialog:visible').get_by_role('button', name='Fact 검증 완료', exact=True).click()
+            expect(page.locator('dialog:visible')).to_have_count(0)
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
+            # 이전 Python 서버와 새 화면이 섞였을 때 빈 목록으로 숨기지 않고 재시작 방법을 안내합니다.
+            feed = '**/api/news/public/feed?limit=30'
+            public_page.route(feed, lambda route: route.fulfill(status=422, json={'detail': []}))
+            public_page.locator('#regionalNewsRefresh').click()
+            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('Node·FastAPI를 모두 다시 시작')
+            public_page.unroute(feed)
+            public_page.locator('#regionalNewsRefresh').click()
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
             page.get_by_role('button', name='검증 Fact로 초안 생성').click()
             # 간편 화면에는 원문·기사, 확인 하나, 선택 메모만 있습니다.
             dialog = page.locator('dialog:visible')
@@ -214,28 +253,25 @@ def main():
             expect(dialog.locator('[data-check], [data-review], [data-publish]')).to_have_count(0)
             dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
             expect(dialog.locator('.news-error')).to_contain_text('원문 대조 확인을 체크하세요')
-            public_page = context.new_page()
-            public_page.goto(base + '/')
-            expect(public_page.locator('#regionalNews h2')).to_have_text('지역 소식')
-            expect(public_page.locator('[data-news-mode]')).to_have_count(0)
-            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('검증 후 저장된 지역 소식이 아직 없습니다')
-            public_page.locator('#regionalNews').scroll_into_view_if_needed()
-            capture_publication(public_page, '간편 검증 1/5 · 검증 저장 전에는 지역 소식이 비어 있습니다')
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
+            expect(public_page.locator('#regionalNewsCards')).not_to_contain_text('신주쿠 지역 소식 안내')
             dialog.locator('[name=source_checked]').check()
             expect(dialog.locator('.news-error')).to_have_text('')
             expect(dialog.locator('[name=note]')).to_have_value('')
             dialog.locator('[type=submit]').scroll_into_view_if_needed()
-            capture_publication(page, '간편 검증 2/5 · 원문·기사 비교, 확인 하나와 선택 메모')
+            capture_publication(page, '지역 소식 4/7 · AI 기사는 원문 비교 후 확인 하나로 검증·저장')
             dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
             expect(page.locator('dialog:visible')).to_have_count(0)
             expect(page.locator('#newsWorkspace')).to_contain_text('검증·저장 완료')
             expect(page.locator('#newsWorkspace')).to_contain_text('검증 저장 1건')
             expect(page.get_by_role('button', name='상태 변경', exact=True)).to_have_count(0)
             page.locator('[aria-label="메인 노출 상태"]').scroll_into_view_if_needed()
-            capture_publication(page, '간편 검증 3/5 · 메모 없이 검증·공개가 함께 저장됩니다')
+            capture_publication(page, '지역 소식 5/7 · 기사 검증·공개 저장, 상태 변경 항목 없음')
             expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 지역 소식 안내')
+            expect(public_page.locator('#regionalNewsCards article')).to_have_count(1)
+            expect(public_page.locator('#regionalNewsCards')).not_to_contain_text('원문 검증 소식')
             public_page.locator('#regionalNews').scroll_into_view_if_needed()
-            capture_publication(public_page, '간편 검증 4/5 · 열린 메인의 지역 소식에 즉시 반영')
+            capture_publication(public_page, '지역 소식 6/7 · 저장한 기사가 Fact 카드를 대신해 표시됩니다')
             # 점심·여행 선택이 다른 지역이어도 검증 저장한 뉴스가 사라지지 않습니다.
             public_page.locator('#countryId').select_option(label='대한민국')
             public_page.locator('#provinceId').select_option(label='서울특별시')
@@ -244,7 +280,7 @@ def main():
             expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 지역 소식 안내')
             public_page.get_by_role('button', name='소식 읽기 ↗').click()
             expect(public_page.locator('dialog:visible')).to_contain_text('브라우저 테스트 원자료')
-            capture_publication(public_page, '간편 검증 5/5 · 저장된 기사와 원문 출처 확인')
+            capture_publication(public_page, '지역 소식 7/7 · 점심·여행 지역과 무관하게 기사·출처 확인')
             public_page.locator('dialog:visible').get_by_role('button', name='닫기', exact=True).click()
             page.get_by_role('button', name='원문 비교·검증', exact=True).first.click()
             page.locator('dialog:visible [data-stop-public]').click()
@@ -286,14 +322,15 @@ def main():
                 manifest_file = ROOT / 'docs/assets/demo-recordings.json'
                 manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
                 entry = {'file': 'docs/assets/news-publication-demo.gif',
-                         'title': '지역 소식 — 원문 비교 후 한 번에 검증·저장',
-                         'description': '**모의 AI 응답**을 사용하는 격리 MySQL 테스트에서 확인 체크 하나·빈 메모 저장·열린 메인의 자동 반영·지역 선택과 독립된 소식·원자료 표시를 확인했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**',
-                         'alt': '모의 AI 응답의 격리 테스트에서 원문 비교 후 한 번에 검증 저장하고 지역 소식과 출처를 확인한 실제 화면'}
+                         'title': '지역 소식 — 검증 Fact 표시와 기사 검증·저장',
+                         'recorded_at': '2026-10-20',
+                         'description': '격리 MySQL에서 **AI 생성 없이 검증 Fact가 메인에 표시**되고 원자료를 읽는 것을 확인했습니다. 이어 **모의 AI 응답**으로 확인 하나·빈 메모 기사 저장·카드 교체를 확인했습니다. 검증·수정 후 자동 갱신과 공개 중단도 시험했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**',
+                         'alt': '실제 테스트 화면에서 Fact 검증만으로 지역 소식 표시 후 모의 AI 기사의 검증 저장과 출처를 확인한 일곱 단계'}
                 manifest['recordings'] = [r for r in manifest['recordings'] if r['file'] != entry['file']] + [entry]
                 manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
                 print(f'Publication GIF: {len(publication_frames)} frames, {file.stat().st_size} bytes', flush=True)
             browser.close()
-        print('Browser PASS: connection recovery + KR/JP topic selection/race + source/fact + simple verify-and-save/blank memo + public news independent of lunch/travel + stop refresh + Japan/mobile')
+        print('Browser PASS: connection recovery + KR/JP topics/race + verified Facts without AI + edit/reverify refresh + stale server error/cache + simple article save/blank memo + one card per topic + stop without Fact fallback + Japan/mobile')
     finally:
         for process in processes:
             process.terminate()
