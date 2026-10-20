@@ -192,6 +192,14 @@
 #newsStatus[data-error="true"] {
   color: #b42318;
 }
+#newsRecovery {
+  padding: 12px 16px;
+  margin: 12px 0;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  border-radius: 10px;
+  color: #9a3412;
+}
 @media (max-width: 760px) {
   #news .news-row {
     flex-direction: column;

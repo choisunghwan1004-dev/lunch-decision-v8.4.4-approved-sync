@@ -2,10 +2,8 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 rem 키를 화면에 표시하지 않고 이 PC의 .env에 저장합니다. API 호출은 없습니다.
-if not exist .venv\Scripts\python.exe (
- py -3 -m venv .venv
- if errorlevel 1 goto failed
-)
+call scripts\ensure-news-python.bat
+if errorlevel 1 goto failed
 .venv\Scripts\python.exe -m pip install -r news_service\requirements.txt
 if errorlevel 1 goto failed
 .venv\Scripts\python.exe -m news_service.openai_check --configure-key

@@ -4,10 +4,8 @@ cd /d "%~dp0"
 rem 무료 테스트는 MySQL·OpenAI 키 없이도 실행합니다. 운영 AI 호출은 하지 않습니다.
 where node >nul 2>nul
 if errorlevel 1 goto missingnode
-if not exist .venv\Scripts\python.exe (
- py -3 -m venv .venv
- if errorlevel 1 goto failed
-)
+call scripts\ensure-news-python.bat
+if errorlevel 1 goto failed
 if not exist node_modules\express (
  call npm ci
  if errorlevel 1 goto failed

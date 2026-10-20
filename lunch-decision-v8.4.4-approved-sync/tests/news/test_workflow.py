@@ -1,5 +1,18 @@
 import pytest
 
+
+@pytest.mark.parametrize('errno,code', [(1045, 'news_db_auth'), (1049, 'news_database_missing'), (1146, 'news_schema_missing'), (2003, 'news_db_unavailable')])
+def test_setup_failures_have_actionable_safe_messages(newsroom, monkeypatch, errno, code):
+    from mysql.connector import Error
+    client, service = newsroom
+    def fail():
+        raise Error(msg='SECRET-CONNECTION-DETAILS', errno=errno)
+    monkeypatch.setattr(service.db, 'transaction', fail)
+    response = client.get('/health')
+    assert response.status_code == 503
+    assert response.json()['code'] == code
+    assert 'SECRET' not in response.text
+
 SOURCE = {'source_kind': 'official', 'organization': '테스트 기관', 'source_title': '원자료 테스트',
           'source_url': 'https://example.org/official', 'published_at': '2026-10-01T00:00:00Z',
           'source_excerpt': '행사는 2026년 11월 1일 종로구에서 개최됩니다. 테스트 자료입니다.',

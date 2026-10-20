@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).resolve().parents[1] / '.env')
+load_dotenv(Path(__file__).resolve().parents[1] / '.env', encoding='utf-8-sig')
 
 
 # DB 이름부터 검증하고 연결합니다. 기존 원본 DB와 같으면 접속 전에 중단합니다.

@@ -26,7 +26,7 @@ log = logging.getLogger('news')
 def auth(x_news_internal_token: str | None = Header(None)):
     token = os.getenv('NEWS_INTERNAL_TOKEN', '')
     if not re.fullmatch(r'[a-fA-F0-9]{64}', token) or not x_news_internal_token or not hmac.compare_digest(token, x_news_internal_token):
-        raise NewsError('뉴스 내부 인증에 실패했습니다.', 403)
+        raise NewsError('뉴스 서버의 연결 설정이 다릅니다. 18_뉴스_연결복구.bat 실행 후 기존 Node·FastAPI 창을 모두 종료하고 09번을 다시 실행하세요.', 403)
 
 
 # Node가 세션에서 정한 검토자 이름을 복원합니다. 브라우저 입력으로 검토자를 지정하지 않습니다.
@@ -55,6 +55,16 @@ async def value_error(_, error):
 @app.exception_handler(Exception)
 async def service_error(_, error):
     log.error('news service error: %s code=%s', type(error).__name__, getattr(error, 'errno', ''))
+    # 설치 문제를 빈 선택 목록으로 숨기지 않도록 다음 행동을 안내합니다. 연결 정보는 보내지 않습니다.
+    messages = {
+        1045: ('news_db_auth', '뉴스 DB에 로그인하지 못했습니다. 프로젝트 .env의 DB_USER·DB_PASSWORD를 확인하고 서버를 다시 시작하세요.'),
+        1049: ('news_database_missing', '운영 DB가 없습니다. .env의 V83_DB_NAME과 npm run setup 결과를 확인하세요.'),
+        1146: ('news_schema_missing', '뉴스 테이블 설치가 필요합니다. 18_뉴스_연결복구.bat을 실행하세요.'),
+        2003: ('news_db_unavailable', 'MySQL 서버에 연결하지 못했습니다. MySQL 서비스·DB_HOST·DB_PORT를 확인하세요.'),
+    }
+    if getattr(error, 'errno', None) in messages:
+        code, detail = messages[error.errno]
+        return JSONResponse(status_code=503, content={'ok': False, 'detail': detail, 'code': code})
     return JSONResponse(status_code=503, content={'ok': False, 'detail': '뉴스 DB/API에 연결할 수 없습니다. 설치·스키마·서버 로그를 확인하세요.'})
 
 
@@ -85,7 +95,7 @@ def health(service: NewsService = Depends(get_service)):
     with service.db.transaction() as tx:
         row = tx.one("SELECT version FROM news_schema_version WHERE name='news'")
         if not row or row['version'] != '8.5.2':
-            raise NewsError('python -m news_service.setup 실행이 필요합니다.', 503)
+            raise NewsError('뉴스 스키마 설치가 필요합니다. 18_뉴스_연결복구.bat을 실행하세요.', 503)
     return {'ok': True, 'version': '8.5.2', 'model': MODEL,
             'openaiConfigured': configuration()['key_configured'],
             'modelConfigured': configuration()['model_configured']}

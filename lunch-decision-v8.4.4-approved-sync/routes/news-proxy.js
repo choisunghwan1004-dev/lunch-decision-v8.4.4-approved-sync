@@ -88,7 +88,8 @@ function createNewsProxy(options = {}) {
         .status(503)
         .json({
           ok: false,
-          detail: "뉴스 설치 후 Node와 FastAPI를 다시 시작하세요.",
+          code: "news_not_configured",
+          detail: "뉴스 연결 설정이 준비되지 않았습니다. 18_뉴스_연결복구.bat 실행 후 기존 서버 창을 종료하고 09_뉴스_서버시작.bat을 다시 실행하세요.",
         });
     const target = new URL(req.path, base);
     if (publicRead) {
@@ -126,6 +127,7 @@ function createNewsProxy(options = {}) {
         .status(503)
         .json({
           ok: false,
+          code: "news_server_unavailable",
           detail:
             "뉴스 서버에 연결할 수 없습니다. FastAPI(8001) 실행을 확인하세요.",
         });

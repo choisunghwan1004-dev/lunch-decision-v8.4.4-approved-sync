@@ -105,6 +105,10 @@ test("invalid internal configuration fails closed without affecting the main app
       "http://127.0.0.1:" + server.address().port + "/api/news/public",
     );
     assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.code, "news_not_configured");
+    assert.match(body.detail, /18_뉴스_연결복구/);
+    assert.ok(!JSON.stringify(body).includes("NEWS_INTERNAL_TOKEN="));
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

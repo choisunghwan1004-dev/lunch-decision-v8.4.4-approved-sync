@@ -53,17 +53,52 @@
     drafts = [],
     active = 0,
     dialog = null,
-    opening = null;
+    opening = null,
+    ready = false,
+    loading = false,
+    workspaceVersion = 0;
   const status = (message, error = false) => {
     el("newsStatus").textContent = message;
     el("newsStatus").dataset.error = String(error);
   };
+  // 목록이 비어 있는 이유를 구분합니다. 연결 오류를 정상적인 빈 목록으로 보이면 안 됩니다.
+  function controls() {
+    root.querySelector('[data-news-action="new-topic"]').disabled = !ready || !regions.length;
+    root.querySelector('[data-news-action="retry"]').disabled = loading;
+    el("newsTopic").disabled = !ready || !topics.length;
+    el("newsTopicHint").textContent = !ready
+      ? "뉴스 연결이 준비되면 시군구와 주제를 선택할 수 있습니다."
+      : !regions.length
+        ? "등록된 시군구가 없습니다. 지역 관리에서 지역을 등록한 뒤 연결을 다시 확인하세요."
+        : !topics.length
+          ? "등록된 주제가 없습니다. 새 주제에서 시군구와 제목을 입력해 먼저 저장하세요."
+          : `${regions.length}개 시군구 · ${topics.length}개 주제에서 선택할 수 있습니다.`;
+  }
+  function unavailable(error) {
+    ready = false;
+    regions = []; topics = []; sources = []; facts = []; drafts = [];
+    ++workspaceVersion; // 이전 주제의 느린 응답이 오류 안내를 덮어쓰지 못하게 합니다.
+    el("newsTopic").innerHTML = '<option value="">뉴스 연결을 먼저 복구하세요</option>';
+    el("newsWorkspace").textContent = "연결을 복구한 뒤 주제 등록·선택을 계속할 수 있습니다.";
+    el("newsRecovery").hidden = false;
+    status(error.message, true);
+    controls();
+  }
+  function topicSelector() {
+    if (!topics.some((t) => Number(t.id) === active)) active = 0;
+    el("newsTopic").innerHTML =
+      `<option value="">${topics.length ? "주제를 선택하세요" : "새 주제를 먼저 등록하세요"}</option>` +
+      topics.map((t) => `<option value="${t.id}">${escape(t.region_name)} · ${escape(t.title)}${t.is_demo ? " [시연]" : ""}</option>`).join("");
+    el("newsTopic").value = active || "";
+    controls();
+  }
   // 동일 출처의 Node 프록시를 호출합니다. 세션 쿠키와 쓰기 확인 헤더를 보내지만 비밀 키는 보내지 않습니다.
   async function api(path, method = "GET", data) {
     const response = await fetch("/api/news" + path, {
       method,
       credentials: "same-origin",
       cache: "no-store",
+      signal: AbortSignal.timeout(path.endsWith("/generate") || path === "/ai/check" ? 60000 : 15000),
       headers: { "Content-Type": "application/json", "X-News-Request": "1" },
       ...(method !== "GET" ? { body: JSON.stringify(data || {}) } : {}),
     });
@@ -72,7 +107,10 @@
       const detail = Array.isArray(result.detail)
         ? result.detail.map((x) => x.msg).join("\n")
         : result.detail || result.message;
-      throw Error(detail || "뉴스 요청에 실패했습니다.");
+      const error = Error(detail || "뉴스 요청에 실패했습니다.");
+      error.code = result.code;
+      error.status = response.status;
+      throw error;
     }
     return result;
   }
@@ -102,7 +140,8 @@
           status("저장했습니다. 뉴스 목록에서 계속 작업할 수 있습니다.");
           await refresh();
         } catch (error) {
-          form.querySelector(".news-error").textContent = error.message;
+          if (form.isConnected) form.querySelector(".news-error").textContent = error.message;
+          else unavailable(error);
         } finally {
           if (button) button.disabled = false;
         }
@@ -146,16 +185,8 @@
   // 주제 목록을 다시 읽고 현재 선택 주제를 유지합니다.
   async function refresh() {
     topics = await api("/topics");
-    const selector = el("newsTopic");
-    selector.innerHTML =
-      '<option value="">주제를 선택하세요</option>' +
-      topics
-        .map(
-          (t) =>
-            `<option value="${t.id}">${escape(t.region_name)} · ${escape(t.title)}${t.is_demo ? " [시연]" : ""}</option>`,
-        )
-        .join("");
-    selector.value = active || "";
+    if (!Array.isArray(topics)) throw Error("뉴스 주제 목록 형식이 올바르지 않습니다. 연결을 다시 확인하세요.");
+    topicSelector();
     if (active) await workspace();
     else
       el("newsWorkspace").innerHTML =
@@ -163,13 +194,24 @@
   }
   // 선택 주제의 출처·Fact·초안 목록을 독립 요청으로 읽어 단계별로 표시합니다.
   async function workspace() {
-    const topic = topics.find((t) => Number(t.id) === active);
+    const selected = active, version = ++workspaceVersion;
+    const topic = topics.find((t) => Number(t.id) === selected);
     if (!topic) return;
-    [sources, facts, drafts] = await Promise.all([
-      api(`/topics/${active}/sources`),
-      api(`/topics/${active}/facts`),
-      api(`/topics/${active}/drafts`),
-    ]);
+    el("newsWorkspace").textContent = "선택한 주제의 출처·Fact·초안을 불러오고 있습니다.";
+    let lists;
+    try {
+      lists = await Promise.all([
+        api(`/topics/${selected}/sources`),
+        api(`/topics/${selected}/facts`),
+        api(`/topics/${selected}/drafts`),
+      ]);
+    } catch (error) {
+      if (selected === active && version === workspaceVersion) throw error;
+      return;
+    }
+    // 빠르게 주제를 바꿔도 나중에 도착한 이전 주제 응답이 현재 화면에 섞이지 않습니다.
+    if (selected !== active || version !== workspaceVersion || !ready) return;
+    [sources, facts, drafts] = lists;
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
  <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
@@ -189,6 +231,10 @@
     });
   }
   function newTopic() {
+    if (!ready || !regions.length) {
+      status("뉴스 연결과 시군구 목록을 먼저 확인하세요.", true);
+      return;
+    }
     modal(
       "뉴스 주제 등록",
       `<label>지역<select name="district_id" required><option value="">시군구 선택</option>${regions.map((r) => `<option value="${r.id}">${escape(r.label)}</option>`).join("")}</select></label>${input("title", "주제", "", "text", 'required maxlength="200"')}<label>분류<select name="category"><option value="tourism">관광</option><option value="festival">축제·행사</option><option value="transport">교통</option><option value="culture">문화</option><option value="other">기타</option></select></label><label class="news-check"><input name="is_demo" type="checkbox">시연용 가상 자료 (운영 게시 불가)</label>${submit("주제 저장")}`,
@@ -478,6 +524,7 @@
     const action = b.dataset.newsAction,
       id = Number(b.dataset.id) || null;
     try {
+      if (action === "retry") return await window.NewsAdmin.open();
       if (action === "new-topic") return newTopic();
       if (action === "ai-check") return await openAICheck();
       if (!active) return;
@@ -511,31 +558,49 @@
     }
   });
   el("newsTopic").addEventListener("change", async (event) => {
+    if (!ready) return;
     active = Number(event.target.value) || 0;
     try {
-      await refresh();
+      if (active) await workspace();
+      else {
+        ++workspaceVersion;
+        el("newsWorkspace").textContent = "작업할 뉴스 주제를 선택하세요.";
+      }
     } catch (error) {
-      status(error.message, true);
+      unavailable(error);
     }
   });
   window.NewsAdmin = {
     open: () => {
       if (opening) return opening;
       opening = (async () => {
+        loading = true;
+        ready = false;
+        controls();
+        status("뉴스 연결과 시군구·주제 목록을 확인하고 있습니다.");
         try {
           const health = await api("/health");
-          regions = await api("/regions");
-          await refresh();
+          const lists = await Promise.all([api("/regions"), api("/topics")]);
+          if (lists.some((list) => !Array.isArray(list))) throw Error("뉴스 목록을 확인할 수 없습니다. 연결을 다시 확인하세요.");
+          [regions, topics] = lists;
+          ready = true;
+          el("newsRecovery").hidden = true;
+          topicSelector();
+          if (active) await workspace();
+          else el("newsWorkspace").textContent = "새 주제를 등록하거나 기존 주제를 선택해 작업하세요.";
           status(
             `뉴스 서버 연결됨 · ${health.model} · ${health.openaiConfigured ? "AI 키 설정됨" : "서버에 OPENAI_API_KEY를 설정하면 초안 생성 가능"}${health.modelConfigured ? "" : " · OPENAI_NEWS_MODEL 설정을 확인하세요"}`,
           );
         } catch (error) {
-          status(error.message, true);
+          unavailable(error);
         } finally {
+          loading = false;
           opening = null;
+          controls();
         }
       })();
       return opening;
     },
   };
+  controls();
 })();

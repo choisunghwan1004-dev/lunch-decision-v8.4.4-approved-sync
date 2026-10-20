@@ -5,9 +5,12 @@
 
 """Create/upgrade news tables without modifying lunch/travel tables or OLD_DB_NAME."""
 import argparse
+from io import StringIO
 from pathlib import Path
 import re
 import secrets
+
+from dotenv import dotenv_values
 
 from .db import connect
 
@@ -72,14 +75,19 @@ INDEXES = {
 def initialize_env():
     path = ROOT / '.env'
     text = path.read_text(encoding='utf-8-sig') if path.exists() else (ROOT / '.env.example').read_text(encoding='utf-8')
-    match = re.search(r'^NEWS_INTERNAL_TOKEN=(.*)$', text, re.M)
-    if not match or not re.fullmatch(r'[0-9a-fA-F]{64}', match.group(1).strip()):
-        line = 'NEWS_INTERNAL_TOKEN=' + secrets.token_hex(32)
-        text = re.sub(r'^NEWS_INTERNAL_TOKEN=.*$', line, text, flags=re.M) if match else text.rstrip() + '\n' + line + '\n'
+    # 따옴표·공백·export가 있는 유효한 토큰도 그대로 재사용합니다. 반복 설치로 인증이 바뀌면 안 됩니다.
+    values = dotenv_values(stream=StringIO(text))
+    token = values.get('NEWS_INTERNAL_TOKEN') or ''
+    if not re.fullmatch(r'[0-9a-fA-F]{64}', token):
+        token = secrets.token_hex(32)
+    lines = [line for line in text.splitlines()
+             if not re.match(r'^\s*(?:export\s+)?NEWS_INTERNAL_TOKEN\s*=', line)]
+    text = '\n'.join(lines)
     defaults = {'NEWS_SERVICE_URL': 'http://127.0.0.1:8001', 'OPENAI_NEWS_MODEL': 'gpt-6-luna', 'OPENAI_API_KEY': ''}
     for key, value in defaults.items():
-        if not re.search(r'^' + key + '=', text, re.M):
+        if key not in values:
             text = text.rstrip() + '\n' + key + '=' + value + '\n'
+    text = text.rstrip() + '\nNEWS_INTERNAL_TOKEN=' + token + '\n'
     path.write_text(text, encoding='utf-8')
     print('.env 뉴스 내부 토큰 설정 완료 (토큰 값은 출력하지 않습니다).')
 
@@ -187,13 +195,16 @@ def migrate(conn, allow_upgrade=False):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--init-env', action='store_true')
+    parser.add_argument('--init-env-only', action='store_true', help='DB 연결 없이 뉴스 연결 설정만 준비')
     parser.add_argument('--upgrade-existing', action='store_true')
     args = parser.parse_args()
-    if args.init_env:
+    if args.init_env or args.init_env_only:
         initialize_env()
         # db.py loaded dotenv before the newly written values existed.
         from dotenv import load_dotenv
         load_dotenv(ROOT / '.env', override=True)
+    if args.init_env_only:
+        return
     conn = connect()
     try:
         migrate(conn, args.upgrade_existing)

@@ -26,10 +26,10 @@ def port():
         return sock.getsockname()[1]
 
 
-def wait_url(url):
+def wait_url(url, headers=None):
     for _ in range(150):
         try:
-            with urllib.request.urlopen(url, timeout=1):
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=1):
                 return
         except Exception:
             time.sleep(.1)
@@ -67,10 +67,12 @@ def main():
         for command, logfile in [([sys.executable, '-m', 'uvicorn', 'browser_app:app', '--app-dir', str(ROOT / 'tests' / 'news'), '--host', '127.0.0.1', '--port', str(api_port)], 'browser-api.log'), (['node', 'server.js'], 'browser-node.log')]:
             handle = (ARTIFACTS / logfile).open('w')
             handles.append(handle)
-            processes.append(subprocess.Popen(command, cwd=ROOT, env=env, stdout=handle, stderr=subprocess.STDOUT))
+            # 처음에는 Node의 토큰 누락 상태로 사용자의 빈 선택 목록 오류를 실제 재현합니다.
+            launch_env = {**env, 'NEWS_INTERNAL_TOKEN': ''} if command[0] == 'node' else env
+            processes.append(subprocess.Popen(command, cwd=ROOT, env=launch_env, stdout=handle, stderr=subprocess.STDOUT))
         base = f'http://127.0.0.1:{web_port}'
         wait_url(base + '/health')
-        wait_url(base + '/api/news/public')
+        wait_url(f'http://127.0.0.1:{api_port}/health', {'x-news-internal-token': env['NEWS_INTERNAL_TOKEN']})
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, args=['--no-sandbox'])
             page = browser.new_page(viewport={'width': 1440, 'height': 1000})
@@ -81,6 +83,33 @@ def main():
             page.locator('#password').fill(password)
             page.get_by_role('button', name='관리자 로그인', exact=True).click()
             page.get_by_role('button', name='📰 지역 뉴스', exact=True).click()
+            expect(page.locator('#newsStatus')).to_contain_text('18_뉴스_연결복구')
+            expect(page.get_by_role('button', name='새 주제', exact=True)).to_be_disabled()
+            expect(page.locator('#newsTopic')).to_be_disabled()
+            expect(page.locator('#newsRecovery')).to_be_visible()
+            # 실제 Node 프로세스를 올바른 설정으로 재시작합니다. 기존 세션은 다시 로그인합니다.
+            processes[1].terminate();processes[1].wait(timeout=5)
+            handle = (ARTIFACTS / 'browser-node-recovered.log').open('w')
+            handles.append(handle)
+            processes.append(subprocess.Popen(['node', 'server.js'], cwd=ROOT, env=env, stdout=handle, stderr=subprocess.STDOUT))
+            wait_url(base + '/health')
+            page.reload()
+            page.locator('#username').fill('news-test-editor')
+            page.locator('#password').fill(password)
+            page.get_by_role('button', name='관리자 로그인', exact=True).click()
+            page.get_by_role('button', name='📰 지역 뉴스', exact=True).click()
+            expect(page.locator('#newsStatus')).to_contain_text('뉴스 서버 연결됨')
+            expect(page.locator('#newsRecovery')).to_be_hidden()
+            expect(page.locator('#newsTopic')).to_be_disabled()
+            expect(page.locator('#newsTopicHint')).to_contain_text('등록된 주제가 없습니다')
+            # 지역 미등록과 연결 장애를 구분하고, 재조회하면 선택 기능을 복구합니다.
+            page.route('**/api/news/regions', lambda route: route.fulfill(json=[]))
+            page.get_by_role('button', name='연결 다시 확인', exact=True).click()
+            expect(page.locator('#newsTopicHint')).to_contain_text('등록된 시군구가 없습니다')
+            expect(page.get_by_role('button', name='새 주제', exact=True)).to_be_disabled()
+            page.unroute('**/api/news/regions')
+            page.get_by_role('button', name='연결 다시 확인', exact=True).click()
+            expect(page.get_by_role('button', name='새 주제', exact=True)).to_be_enabled()
             # 키가 없을 때는 실제 호출 버튼을 막고 설정 방법을 안내합니다.
             page.get_by_role('button', name='OpenAI 연결 확인', exact=True).click()
             expect(page.locator('dialog:visible')).to_contain_text('키 미설정')
@@ -103,6 +132,33 @@ def main():
             dialog.locator('[name=title]').fill('신주쿠 행사 소식')
             dialog.get_by_role('button', name='주제 저장').click()
             expect(page.locator('dialog:visible')).to_have_count(0)
+            japan_topic = page.locator('#newsTopic').input_value()
+            assert japan_topic
+            expect(page.locator('#newsWorkspace')).to_contain_text('신주쿠 행사 소식')
+            # 두 번째 한국 주제를 저장하고 실제 DB의 두 주제를 번갈아 선택합니다.
+            page.get_by_role('button', name='새 주제', exact=True).click()
+            dialog = page.locator('dialog:visible')
+            labels = dialog.locator('select[name=district_id] option').all_text_contents()
+            dialog.locator('[name=district_id]').select_option(label=next(label for label in labels if '종로구' in label))
+            dialog.locator('[name=title]').fill('종로 관광 소식 선택 검사')
+            dialog.get_by_role('button', name='주제 저장').click()
+            expect(page.locator('dialog:visible')).to_have_count(0)
+            korea_topic = page.locator('#newsTopic').input_value()
+            assert korea_topic != japan_topic
+            held = []
+            path = '**/api/news/topics/' + japan_topic + '/sources'
+            page.route(path, lambda route: held.append(route))
+            page.locator('#newsTopic').select_option(japan_topic)
+            page.wait_for_function('document.querySelector("#newsTopic").value === ' + repr(japan_topic))
+            page.locator('#newsTopic').select_option(korea_topic)
+            expect(page.locator('#newsWorkspace')).to_contain_text('종로 관광 소식 선택 검사')
+            assert held, 'first topic request must be held'
+            for request in held:
+                request.fulfill(json=[])
+            expect(page.locator('#newsWorkspace')).to_contain_text('종로 관광 소식 선택 검사')
+            page.unroute(path)
+            page.locator('#newsTopic').select_option(japan_topic)
+            expect(page.locator('#newsWorkspace')).to_contain_text('신주쿠 행사 소식')
             page.get_by_role('button', name='출처 등록', exact=True).click()
             dialog = page.locator('dialog:visible')
             for key, value in {'organization': '브라우저 테스트 기관', 'source_title': '브라우저 테스트 원자료',
@@ -187,7 +243,7 @@ def main():
             expect(page.locator('#newsWorkspace')).to_contain_text('검증 대기')
             assert not errors, errors
             browser.close()
-        print('Browser PASS: admin source/fact/evidence/AI/review/approval/publish + Japan lunch/travel news + mobile')
+        print('Browser PASS: connection recovery + empty lists + KR/JP topic selection/race + source/fact/review/publish + Japan/mobile')
     finally:
         for process in processes:
             process.terminate()
