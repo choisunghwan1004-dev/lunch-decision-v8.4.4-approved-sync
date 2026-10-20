@@ -65,7 +65,7 @@ function newsBlock(root) {
 | 항목 | 현재 구현 |
 | --- | --- |
 | 뉴스 버전 · 모델 | V${cell(i.version)} · \`${cell(i.model)}\` (설정·사용 권한 필요) |
-| 화면 | 관리자 \`/admin\` → **지역 뉴스** · 사용자 \`/\` → **점심과 여행, 지역 소식** |
+| 화면 | 관리자 \`/admin\` → **지역 뉴스** · 사용자 \`/\` → **지역 소식** |
 | 실행 구조 | Node.js 화면·세션 → 내부 토큰 프록시 → Python FastAPI → MySQL |
 | 예약 | ${cell(i.timezone)} 매일 **${cell(i.dailyTime)}** · 별도 예약 등록 필요 |
 | DB | 기본 뉴스·버전 테이블 ${i.tables.length}개 + 선택 예약 테이블 ${i.optionalTables.length}개 |

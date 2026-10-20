@@ -27,7 +27,7 @@
     changes_requested: "수정 요청",
     rejected: "반려",
     approved: "최종 승인",
-    published: "게시 중",
+    published: "검증·저장 완료",
     candidate: "검증 대기",
     verified: "검증 완료",
     disputed: "이견 있음",
@@ -105,7 +105,12 @@
     const result = await response.json();
     if (!response.ok) {
       const detail = Array.isArray(result.detail)
-        ? result.detail.map((x) => x.msg).join("\n")
+        ? result.detail.map(x => {
+          const field = x.loc?.[x.loc.length - 1];
+          if (x.type === "literal_error") return "원문 대조 확인을 체크하세요.";
+          if (x.type === "string_too_short") return `${({reason:"메모",verification_note:"검증 메모",note:"메모",source_excerpt:"원문 구절",title:"제목"})[field] || "입력 내용"}을 ${x.ctx?.min_length || 3}자 이상 입력하세요.`;
+          return x.msg;
+        }).join("\n")
         : result.detail || result.message;
       const error = Error(detail || "뉴스 요청에 실패했습니다.");
       error.code = result.code;
@@ -212,22 +217,21 @@
     // 빠르게 주제를 바꿔도 나중에 도착한 이전 주제 응답이 현재 화면에 섞이지 않습니다.
     if (selected !== active || version !== workspaceVersion || !ready) return;
     [sources, facts, drafts] = lists;
-    // Fact 저장·검증과 기사 승인·게시는 서로 다른 저장 단계입니다. 현재 DB 상태와 다음 동작을 명시합니다.
+    // Fact 확인과 기사 검증 저장의 진행 상황을 표시합니다. 기사 확인·승인·공개는 한 번에 저장합니다.
     const verified = facts.filter(f => f.status === "verified").length;
-    const approved = drafts.filter(d => d.status === "approved").length;
     const published = drafts.filter(d => d.status === "published").length;
     const nextStep = topic.is_demo ? "시연용 주제는 운영 화면에 게시할 수 없습니다."
-      : published ? "게시가 저장되었습니다. 사용자 화면에서 같은 지역 또는 전체 지역을 선택해 확인하세요."
-      : approved ? "최종 승인이 저장되었습니다. 기사 검토·수정을 열고 승인본 게시를 눌러야 메인에 표시됩니다."
-      : drafts.length ? "초안이 저장되었습니다. 문장별 근거 대조 → 최종 승인 → 승인본 게시를 진행하세요."
-      : verified ? "Fact 검증이 저장되었습니다. 검증 Fact로 초안 생성 → 기사 검토 → 승인 → 게시를 진행하세요."
+      : published ? "검증·저장이 완료되어 메인 지역 소식에 표시됩니다."
+      : drafts.some(d => d.status === "approved") ? "이전에 승인한 기사입니다. 원문 비교·검증에서 확인 후 저장하면 지역 소식에 표시됩니다."
+      : drafts.length ? "기사가 저장되었습니다. 원문 비교·검증에서 확인 후 검증 완료·저장을 누르세요."
+      : verified ? "Fact 검증이 저장되었습니다. 초안을 만든 뒤 원문 비교·검증에서 저장하세요."
       : "출처와 Fact를 저장한 뒤 원문 대조로 Fact를 검증하세요.";
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
- <section class="news-block" aria-label="메인 노출 상태"><h3>메인 노출 상태</h3><p>출처 ${sources.length}건 · Fact ${facts.length}건 / 검증 ${verified}건 · 기사 ${drafts.length}건 / 승인 ${approved}건 / 게시 ${published}건</p><p>${escape(nextStep)}</p><a href="/?news_scope=all#regionalNews" target="_blank" rel="noopener noreferrer">사용자 화면의 전체 지역 소식 확인 ↗</a></section>
+ <section class="news-block" aria-label="메인 노출 상태"><h3>메인 노출 상태</h3><p>출처 ${sources.length}건 · Fact ${facts.length}건 / 검증 ${verified}건 · 기사 ${drafts.length}건 / 검증 저장 ${published}건</p><p>${escape(nextStep)}</p><a href="/#regionalNews" target="_blank" rel="noopener noreferrer">지역 소식 확인 ↗</a></section>
  <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
- <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="fact-status" data-id="${f.id}">상태 변경</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
- <section class="news-block"><div class="news-toolbar"><div><h3>3. 초안 · 최종 검토 · 게시</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">기사 검토·수정</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
+ <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
+ <section class="news-block"><div class="news-toolbar"><div><h3>3. 기사 · 원문 비교·검증 저장</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">원문 비교·검증</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
   }
   // DB의 실제 시군구를 선택해 새 주제를 등록합니다.
   // 파일을 브라우저에서 읽어 서버의 CSV/JSON 파서로 보냅니다. 검증·승인은 자동 처리하지 않습니다.
@@ -361,129 +365,49 @@
     const f = facts.find((x) => Number(x.id) === id);
     modal(
       "Fact 원문 대조 · 사람의 검증",
-      `${evidenceHTML(f)}<label class="news-check"><input type="checkbox" name="editor_confirmed" required>원문을 직접 열어 수치·날짜·지역·표현을 대조했습니다.</label>${text("verification_note", "검증 의견", "", 'required minlength="3" maxlength="4000"')}${submit("Fact 검증 완료")}`,
+      `${evidenceHTML(f)}<label class="news-check"><input type="checkbox" name="editor_confirmed" required>원문을 직접 열어 수치·날짜·지역·표현을 대조했습니다.</label>${text("verification_note", "검증 메모 (선택)", "", 'maxlength="4000"')}${submit("Fact 검증 완료")}`,
       async (data) => {
         await api(`/topics/${active}/facts/${id}/verify`, "POST", {
           editor_confirmed: data.has("editor_confirmed"),
-          verification_note: data.get("verification_note"),
+          verification_note: data.get("verification_note")?.trim() || "원문과 사실·날짜·지역을 직접 대조했습니다.",
         });
       },
     );
   }
-  function factStatus(id) {
-    modal(
-      "Fact 상태 변경",
-      `<label>상태<select name="status"><option value="candidate">검증 대기</option><option value="disputed">이견 있음</option><option value="outdated">만료</option><option value="rejected">반려</option></select></label>${text("reason", "변경 이유", "", 'required minlength="3"')}<p class="news-warning">이 주제의 승인을 해제하고 게시를 중단합니다.</p>${submit("상태 저장")}`,
-      async (data) => {
-        await api(
-          `/topics/${active}/facts/${id}/status`,
-          "POST",
-          Object.fromEntries(data),
-        );
-      },
-    );
-  }
-  // 기사 문장과 현재/과거 근거를 나란히 표시하고 검토·승인·게시 동작을 연결합니다.
+  // 원문과 기사만 나란히 비교합니다. 확인 한 번과 선택 메모로 검토·승인·공개를 함께 저장합니다.
   async function openDraft(id) {
-    const d = await api("/drafts/" + id),
-      editable = ["generated", "in_review", "changes_requested"].includes(
-        d.status,
-      );
-    modal(
-      `수정본 ${d.revision_no} · ${labels[d.status] || d.status}`,
-      `${d.status === "approved" ? '<p class="news-warning">최종 승인은 저장되었습니다. 아래 승인본 게시를 눌러야 사용자 메인에 공개됩니다.</p>' : ""}${!d.evidence_current ? '<p class="news-warning">현재 Fact Sheet와 다른 초안입니다. 새 수정본을 저장한 뒤 재검토하세요.</p>' : ""}<div class="news-review-grid"><div><h3>${escape(d.title)}</h3>${d.claims.map((c) => `<div class="news-sentence" data-claim="${c.id}"><b>${c.sequence_no === 0 ? "제목" : "문장 " + c.sequence_no}</b> ${pill(c.status)}<p>${escape(c.statement_text)}</p><small>근거 ${escape(c.fact_keys.join(", "))}</small>${editable && d.evidence_current ? `<label class="news-check"><input type="checkbox" data-source-checked>연결된 원자료를 직접 대조했습니다.</label><textarea data-claim-note aria-label="문장 검토 의견" placeholder="검토 의견 (3자 이상)">${escape(c.check_note || "")}</textarea><div class="news-review-actions"><button type="button" data-check="supported" data-id="${c.id}">근거 일치</button><button type="button" data-check="contradicted" data-id="${c.id}">불일치</button></div>` : ""}</div>`).join("")}</div><aside><h3>현재 검증된 Fact와 원자료</h3>${d.facts.map(evidenceHTML).join("") || "<p>현재 검증된 Fact가 없습니다.</p>"}<details><summary>이 수정본 저장 당시의 근거</summary>${d.saved_fact_sheet ? d.saved_fact_sheet.facts.map(evidenceHTML).join("") : "<p>구형 초안에는 근거 원문 스냅샷이 없습니다. 새 수정본을 저장하세요.</p>"}</details></aside></div><div class="news-review-actions"><button type="button" data-edit>새 수정본 작성</button></div><h3>최종 검토</h3><p>승인 후 게시 버튼을 눌러 사용자 화면에 공개합니다.</p>${[
-        ["numbers", "수치·금액·단위"],
-        ["time_and_region", "시점·날짜·지역"],
-        ["no_unfounded_causes", "인과·과장·근거 없는 해석"],
-        ["sources_and_rights", "출처 표시·이용 조건"],
-      ]
-        .map(
-          ([k, label]) =>
-            `<label class="news-check"><input type="checkbox" name="${k}">${label} 확인</label>`,
-        )
-        .join(
-          "",
-        )}${text("review_reason", "검토·수정 요청·게시 중단 의견", "", 'minlength="3" maxlength="2000"')}<div class="news-review-actions"><button type="button" data-review="submitted">검토 요청</button><button type="button" data-review="changes_requested">수정 요청</button><button type="button" data-review="rejected">반려</button><button type="button" data-review="approved" ${d.status === "in_review" ? "" : "disabled"}>최종 승인</button><button type="button" data-publish ${d.status === "approved" ? "" : "disabled"}>승인본 게시</button><button type="button" data-unpublish ${d.status === "published" ? "" : "disabled"}>게시 중단</button></div><details><summary>검토 이력 (${d.reviews.length})</summary>${d.reviews.map((r) => `<p><b>${escape(labels[r.action] || r.action)}</b> · ${escape(r.reviewer_key)} · ${escape(String(r.created_at))}<br>${escape(r.reason)}</p>`).join("") || "<p>검토 이력이 없습니다.</p>"}</details>`,
-    );
-    const current = dialog;
-    async function action(fn, close = false) {
-      const buttons = current.querySelectorAll("button");
-      buttons.forEach((b) => (b.disabled = true));
-      try {
-        await fn();
-        if (close) {
-          current.close();
-          await refresh();
-          status("처리했습니다. 뉴스 목록에서 상태를 확인하세요.");
-        } else await openDraft(id);
-      } catch (error) {
-        current.querySelector(".news-error").textContent = error.message;
-        buttons.forEach((b) => (b.disabled = false));
-      }
-    }
+    const d = await api("/drafts/" + id);
+    const saved = d.status === "published";
+    const canSave = d.evidence_current && d.status !== "rejected";
+    const originals = new Map();
+    d.facts.forEach(f => f.evidence.forEach(source => originals.set(source.source_url, source)));
+    const body = `<p>${saved ? "검증·저장이 완료되어 지역 소식에 표시됩니다." : "왼쪽 원문과 오른쪽 기사를 비교하세요. 확인 후 저장하면 메인의 지역 소식에 바로 표시됩니다."}</p>
+      ${!d.evidence_current ? '<p class="news-warning">근거가 변경되었습니다. 내용을 수정한 새 버전으로 검증하세요.</p>' : ""}
+      <div class="news-review-grid"><aside><h3>원문 근거</h3>${[...originals.values()].map(source => `<section class="news-evidence"><a href="${safeURL(source.source_url)}" target="_blank" rel="noopener noreferrer">${escape(source.source_title)} · 원문 열기 ↗</a><small>${escape(source.organization)}</small><blockquote>${escape(source.source_excerpt)}</blockquote><details><summary>출처 이용 조건</summary><p>${escape(source.license_note)}</p></details></section>`).join("") || "<p>검증된 원문 근거가 없습니다.</p>"}</aside>
+      <section><h3>검증할 기사</h3><h4>${escape(d.title)}</h4><div class="news-article-body">${escape(d.body_text)}</div></section></div>
+      ${!saved ? `<label class="news-check"><input type="checkbox" name="source_checked">원문과 기사 제목·본문의 사실·날짜·지역 및 출처 이용 조건을 대조했습니다.</label>${text("note", "검토 메모 (선택)", "", 'maxlength="2000"')}${submit("검증 완료·저장")}` : '<button type="button" data-stop-public>공개 중단</button>'}
+      <details><summary>내용 수정·검증 기록</summary><button type="button" data-edit>기사 내용 수정</button><p>수정본 ${d.revision_no} · ${escape(labels[d.status] || d.status)}</p>${d.reviews.map(r => `<p>${escape(r.reviewer_key)} · ${escape(String(r.created_at))}<br>${escape(r.reason)}</p>`).join("") || "<p>이전 검증 기록이 없습니다.</p>"}</details>`;
+    const current = modal("원문 비교·검증 저장", body, saved ? null : async data => {
+      if (!data.has("source_checked")) throw Error("원문 대조 확인을 체크하세요.");
+      await api(`/drafts/${id}/verify-and-save`, "POST", {
+        source_checked: true, note: data.get("note") || "", expected_content_hash: d.content_hash,
+      });
+      notifyPublic();
+    });
+    if (!saved && !canSave) current.querySelector('[type="submit"]').disabled = true;
+    // 확인 누락 안내는 체크한 즉시 지워, 체크했는데도 오류가 남아 보이지 않게 합니다.
+    current.querySelector('[name="source_checked"]')?.addEventListener("change", event => {
+      if (event.currentTarget.checked) current.querySelector(".news-error").textContent = "";
+    });
     current.querySelector("[data-edit]").onclick = () => editDraft(d);
-    current.querySelectorAll("[data-check]").forEach(
-      (button) =>
-        (button.onclick = () =>
-          action(async () => {
-            const row = button.closest("[data-claim]");
-            if (!row.querySelector("[data-source-checked]").checked)
-              throw Error("원자료 대조 체크가 필요합니다.");
-            await api(
-              `/drafts/${id}/claims/${button.dataset.id}/review`,
-              "POST",
-              {
-                status: button.dataset.check,
-                source_checked: true,
-                note: row.querySelector("[data-claim-note]").value,
-                expected_content_hash: d.content_hash,
-              },
-            );
-          })),
-    );
-    current.querySelectorAll("[data-review]").forEach(
-      (button) =>
-        (button.onclick = () =>
-          action(async () => {
-            const form = new FormData(current.querySelector("form")),
-              body = {
-                action: button.dataset.review,
-                reason: form.get("review_reason"),
-                expected_content_hash: d.content_hash,
-              };
-            if (body.action === "approved")
-              body.checks = Object.fromEntries(
-                [
-                  "numbers",
-                  "time_and_region",
-                  "no_unfounded_causes",
-                  "sources_and_rights",
-                ].map((k) => [k, form.has(k)]),
-              );
-            await api(`/drafts/${id}/review`, "POST", body);
-          }, button.dataset.review !== "approved")),
-    );
-    current.querySelector("[data-publish]").onclick = () =>
-      action(
-        async () => {
-          await api(`/drafts/${id}/publish`, "POST", {
-            confirmation: "PUBLISH",
-            expected_content_hash: d.content_hash,
-          });
-          notifyPublic();
-        },
-        true,
-      );
-    current.querySelector("[data-unpublish]").onclick = () =>
-      action(
-        async () => {
-          await api(`/drafts/${id}/unpublish`, "POST", {
-            reason: current.querySelector("[name=review_reason]").value,
-          });
-          notifyPublic();
-        },
-        true,
-      );
+    const stop = current.querySelector("[data-stop-public]");
+    if (stop) stop.onclick = async () => {
+      stop.disabled = true;
+      try {
+        await api(`/drafts/${id}/unpublish`, "POST", {reason: "관리자가 지역 소식 공개를 중단했습니다."});
+        notifyPublic(); current.close(); await refresh(); status("공개를 중단했습니다.");
+      } catch (error) { current.querySelector(".news-error").textContent = error.message; stop.disabled = false; }
+    };
   }
   function notifyPublic() {
     try { localStorage.setItem("regional-news-changed", String(Date.now()) + Math.random()); }
@@ -492,15 +416,15 @@
   // 기존 초안을 덮어쓰지 않고 새 수정본을 저장합니다. Fact Key 목록을 쉼표로 나눠 전송합니다.
   function editDraft(d) {
     const sentence = (c, index) =>
-      `<div class="news-sentence">${text("sentence", "본문 문장 " + index, c.statement_text, 'required maxlength="1000"')}${input("fact_keys", "Fact Key (쉼표로 구분)", c.fact_keys.join(", "), "text", "required")}<button type="button" data-remove-sentence>문장 삭제</button></div>`;
+      `<div class="news-sentence">${text("sentence", "본문 문장 " + index, c.statement_text, 'required maxlength="1000"')}<details><summary>근거 연결 변경 (선택)</summary>${input("fact_keys", "Fact Key (쉼표로 구분)", c.fact_keys.join(", "), "text", "required")}</details><button type="button" data-remove-sentence>문장 삭제</button></div>`;
     modal(
       "새 수정본 작성",
-      `<p>수정하면 새 버전으로 저장되며 제목과 모든 문장을 다시 검토해야 합니다.</p><p>사용 가능한 Fact: ${escape(d.facts.map((f) => f.fact_key).join(", "))}</p>${input("title", "기사 제목", d.title, "text", 'required minlength="5" maxlength="200"')}${input("title_fact_keys", "제목 근거 Fact Key", d.claims[0]?.fact_keys.join(", "), "text", "required")}<div data-sentences>${d.claims
+      `<p>수정하면 새 버전으로 저장되며 제목과 모든 문장을 다시 검토해야 합니다.</p><p>사용 가능한 Fact: ${escape(d.facts.map((f) => f.fact_key).join(", "))}</p>${input("title", "기사 제목", d.title, "text", 'required minlength="5" maxlength="200"')}<details><summary>제목 근거 변경 (선택)</summary>${input("title_fact_keys", "제목 근거 Fact Key", d.claims[0]?.fact_keys.join(", "), "text", "required")}</details><div data-sentences>${d.claims
         .slice(1)
         .map((c, i) => sentence(c, i + 1))
         .join(
           "",
-        )}</div><button type="button" data-add-sentence>문장 추가</button>${text("reason", "수정 이유", "", 'required minlength="3" maxlength="1000"')}${submit("새 수정본 저장")}`,
+        )}</div><button type="button" data-add-sentence>문장 추가</button>${text("reason", "수정 메모 (선택)", "", 'maxlength="1000"')}${submit("새 수정본 저장")}`,
       async (data, form) => {
         const split = (value) =>
           String(value)
@@ -517,7 +441,7 @@
           title: data.get("title"),
           title_fact_keys: split(data.get("title_fact_keys")),
           claims,
-          reason: data.get("reason"),
+          reason: data.get("reason")?.trim() || "기사 내용을 수정했습니다.",
           expected_content_hash: d.content_hash,
         });
       },
@@ -552,7 +476,6 @@
       if (action === "fact") factForm(id);
       if (action === "evidence") evidenceForm(id);
       if (action === "verify") verifyForm(id);
-      if (action === "fact-status") factStatus(id);
       if (action === "draft") await openDraft(id);
       if (action === "delete-source" || action === "delete-fact") {
         if (!confirm("이 항목을 삭제하시겠습니까?")) return;

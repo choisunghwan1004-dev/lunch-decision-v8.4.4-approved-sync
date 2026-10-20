@@ -223,6 +223,11 @@ def publish(draft_id: int, data: s.PublishInput, who: str = Depends(editor), ser
     return service.publish(draft_id, data.model_dump(), who)
 
 
+@app.post('/drafts/{draft_id}/verify-and-save', dependencies=AUTH)
+def verify_and_save(draft_id: int, data: s.VerifyAndSaveInput, who: str = Depends(editor), service: NewsService = Depends(get_service)):
+    return service.verify_and_save(draft_id, data.model_dump(), who)
+
+
 @app.post('/drafts/{draft_id}/unpublish', dependencies=AUTH)
 def unpublish(draft_id: int, data: s.ReasonInput, who: str = Depends(editor), service: NewsService = Depends(get_service)):
     return service.unpublish(draft_id, data.model_dump(), who)

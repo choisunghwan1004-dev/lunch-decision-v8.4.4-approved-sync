@@ -7,11 +7,11 @@
 | 파일 | 확인한 실제 동작 | 길이·크기 |
 | --- | --- | --- |
 | [lunch-demo.gif](assets/lunch-demo.gif) | 한국 종로구·일본 신주쿠구 선택과 점심 추천 결과 | 5단계 · 10.8초 · 약 1.10 MiB |
-| [travel-demo.gif](assets/travel-demo.gif) | 종로구 2일 일정, 하루 6단계·총 12단계 | 4단계 · 8.8초 · 약 0.85 MiB |
-| [news-demo.gif](assets/news-demo.gif) | 종로 주제·CSV 가져오기, 출처 3건·Fact 후보 8건·근거 연결 8건, 출처 편집 입력 항목 | 7단계 · 17.2초 · 약 1.28 MiB |
-| [news-publication-demo.gif](assets/news-publication-demo.gif) | **모의 AI 응답**의 테스트 기사 승인·게시·열린 메인 자동 갱신·전체 지역·출처 확인 | 5단계 · 14초 |
+| [travel-demo.gif](assets/travel-demo.gif) | 종로구 2일 일정, 하루 6단계·총 12단계 | 4단계 · 8.8초 · 약 0.84 MiB |
+| [news-demo.gif](assets/news-demo.gif) | 종로 주제·CSV 가져오기, 출처 3건·Fact 후보 8건·근거 연결 8건, 출처 편집 입력 항목 | 7단계 · 17.2초 · 약 1.24 MiB |
+| [news-publication-demo.gif](assets/news-publication-demo.gif) | **모의 AI 응답**의 원문 비교·확인 체크 하나·빈 메모 검증 저장·지역 소식·출처 확인 | 5단계 · 14초 |
 
-점심·여행 장소는 **가상 테스트 데이터**이고 `news-demo.gif`는 기존 공개 행사 자료의 **검증 대기 후보**입니다. 처음 3개 GIF의 DB에서는 기사 초안·게시·AI 사용 기록 모두 0건을 확인했습니다. 별도 `news-publication-demo.gif`는 AI 응답만 테스트 대역으로 대체하고 실제 DB·화면에서 승인·게시·반영을 검증했습니다. 실제 OpenAI·노션 호출과 운영 기사 게시가 아닙니다. 처음 3개 녹화에서 브라우저의 외부 정적 이미지 요청 2건도 차단했습니다. 한글·지역 선택·UTC 입력·검증 대기·게시 카드 표시를 GIF 프레임에서 확인했습니다. Windows에서 직접 다시 녹화하려면 아래 절차를 따릅니다.
+점심·여행 장소는 **가상 테스트 데이터**이고 `news-demo.gif`는 기존 공개 행사 자료의 **검증 대기 후보**입니다. 처음 3개 GIF의 DB에서는 기사 초안·게시·AI 사용 기록 모두 0건을 확인했습니다. 별도 `news-publication-demo.gif`는 AI 응답만 테스트 대역으로 대체하고 실제 DB·화면에서 간편 검증 저장·지역 소식 반영을 검증했습니다. 실제 OpenAI·노션 호출과 운영 기사 게시가 아닙니다. 처음 3개 녹화에서 브라우저의 외부 정적 이미지 요청 2건도 차단했습니다. 한글·지역 선택·UTC 입력·검증 대기·게시 카드 표시를 GIF 프레임에서 확인했습니다. Windows에서 직접 다시 녹화하려면 아래 절차를 따릅니다.
 
 ## 1. ScreenToGif 준비
 
@@ -130,4 +130,4 @@ npm run docs:news:check
 
 자세한 서버 로그·검사 수치는 커밋하지 않는 `test-results/readme-demo`에 남깁니다. 공개할 파일은 검토한 GIF와 녹화 기록뿐입니다. Linux에서는 설치된 한글 TTF의 실제 경로를 `--font`에 전달하고 브라우저에서도 한글 글꼴을 사용할 수 있게 준비합니다. Windows의 위 재현 명령은 제공한 절차이며 이번 검증은 Linux에서 수행했습니다.
 
-게시·자동 갱신 GIF는 별도 통합 테스트에서 만든다. MySQL 접속 환경은 위와 같고, PowerShell에서 `$env:NEWS_RECORD_PUBLICATION='1'`, `$env:NEWS_DEMO_FONT='C:\Windows\Fonts\malgun.ttf'`를 설정한 뒤 `.\.venv\Scripts\python.exe tests\news\browser_smoke.py`를 실행한다. 테스트는 임시 DB에서만 모의 AI 응답을 허용하고 운영 DB에서는 시작을 거절한다. 성공하면 `news-publication-demo.gif`와 해당 녹화 기록을 갱신한다. 두 도구의 결과를 모두 보존하려면 기본 3개 녹화 도구를 먼저, 게시 통합 테스트를 나중에 실행하고 마지막으로 `npm run docs:news`를 실행한다.
+게시·자동 갱신 GIF는 별도 통합 테스트에서 만든다. MySQL 접속 환경은 위와 같고, PowerShell에서 `$env:NEWS_RECORD_PUBLICATION='1'`, `$env:NEWS_DEMO_FONT='C:\Windows\Fonts\malgun.ttf'`를 설정한 뒤 `.\.venv\Scripts\python.exe tests\news\browser_smoke.py`를 실행한다. 테스트는 임시 DB에서만 모의 AI 응답을 허용하고 운영 DB에서는 시작을 거절한다. 성공하면 `news-publication-demo.gif`와 해당 녹화 기록을 갱신한다. 기본 3개 녹화 도구는 다른 시연 기록을 보존하고, 간편 검증 통합 테스트는 해당 GIF만 교체한다. 마지막으로 `npm run docs:news`를 실행한다.

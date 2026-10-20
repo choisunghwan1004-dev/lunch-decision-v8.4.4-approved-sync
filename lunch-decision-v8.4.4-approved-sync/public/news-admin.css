@@ -220,3 +220,7 @@
   overflow-wrap: anywhere;
   max-width: 100%;
 }
+
+/* 간편 원문 대조 화면: 원문과 기사를 읽고 확인 하나로 저장합니다. */
+.news-article-body { white-space: pre-wrap; line-height: 1.85; overflow-wrap: anywhere; }
+.news-evidence > small { display: block; margin-top: 8px; }

@@ -135,6 +135,14 @@ class PublishInput(Input):
     expected_content_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
+# 간편 검증 저장: 원문 전체를 대조했다는 사람의 확인 한 번으로 검토·승인·공개를 함께 저장합니다.
+# 메모는 선택이며 빈 문자열이어도 저장할 수 있습니다. 기존 상세 검토 API는 그대로 유지합니다.
+class VerifyAndSaveInput(Input):
+    source_checked: Literal[True]
+    expected_content_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
+    note: str = Field(default='', max_length=2000)
+
+
 # 게시 중단처럼 이유를 남겨야 하는 작업의 공통 입력입니다.
 class ReasonInput(Input):
     reason: str = Field(min_length=3, max_length=2000)

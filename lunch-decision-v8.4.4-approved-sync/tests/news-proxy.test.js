@@ -37,6 +37,7 @@ test("news proxy restricts private routes, methods and browser writes; keeps sec
   try {
     assert.equal((await fetch(base + "/api/news/topics")).status, 401);
     assert.equal((await fetch(base + "/api/news/ai/status")).status, 401);
+    assert.equal((await fetch(base + "/api/news/drafts/1/verify-and-save", {method:"POST"})).status, 401);
     assert.equal((await fetch(base + "/api/news/ai/check", {method: "POST"})).status, 401);
     assert.equal(
       (await fetch(base + "/api/news/public?district_id=2&limit=6")).status,
@@ -71,6 +72,7 @@ test("news proxy restricts private routes, methods and browser writes; keeps sec
       body: JSON.stringify({ title: "test" }),
     };
     assert.equal((await fetch(base + "/api/news/topics", write)).status, 403);
+    assert.equal((await fetch(base + "/api/news/drafts/1/verify-and-save", write)).status, 403);
     write.headers["x-news-request"] = "1";
     write.headers.origin = "https://elsewhere.example";
     assert.equal((await fetch(base + "/api/news/topics", write)).status, 403);

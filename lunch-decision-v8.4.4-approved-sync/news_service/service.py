@@ -391,20 +391,54 @@ class NewsService:
             approval = tx.one("SELECT * FROM news_reviews WHERE draft_id=%s AND action='approved' ORDER BY id DESC LIMIT 1", (draft_id,))
             if not approval or approval['content_sha256'] != draft['content_hash'] or approval['fact_snapshot_sha256'] != digest:
                 raise NewsError('현재 기사 내용·근거와 일치하는 최종 승인이 없습니다.')
-            previous = tx.all("SELECT draft_id FROM news_publications WHERE topic_id=%s AND status='published' AND draft_id<>%s", (topic['id'], draft_id))
-            for old in previous:
-                tx.execute("UPDATE news_drafts SET status='changes_requested',approved_by=NULL,approved_at=NULL WHERE id=%s", (old['draft_id'],))
-                self.review_log(tx, old['draft_id'], 'unpublished', editor, '새 수정본으로 교체')
-            tx.execute("UPDATE news_publications SET status='unpublished',unpublished_at=NOW(),retraction_reason='새 수정본으로 교체' WHERE topic_id=%s AND status='published' AND draft_id<>%s", (topic['id'], draft_id))
-            publication = tx.one('SELECT id FROM news_publications WHERE draft_id=%s', (draft_id,))
-            if publication:
-                ident = publication['id']
-                tx.execute("UPDATE news_publications SET status='published',published_at=NOW(),unpublished_at=NULL,retraction_reason=NULL WHERE id=%s", (ident,))
-            else:
-                ident = tx.insert("INSERT INTO news_publications(topic_id,draft_id,slug,status,published_at) VALUES(%s,%s,%s,'published',NOW())", (topic['id'], draft_id, 'news-' + str(topic['id']) + '-' + str(draft_id)))
-            tx.execute("UPDATE news_drafts SET status='published' WHERE id=%s", (draft_id,))
-            self.review_log(tx, draft_id, 'published', editor, '최종 승인 버전 게시', digest, draft['content_hash'])
-            return {'ok': True, 'id': ident, 'status': 'published'}
+            return self.store_publication(tx, draft, topic, digest, editor)
+
+    # 기존 상세 게시와 간편 저장이 같은 트랜잭션 안에서 재사용하는 저장 단계입니다.
+    def store_publication(self, tx, draft, topic, digest, editor):
+        draft_id = draft['id']
+        previous = tx.all("SELECT draft_id FROM news_publications WHERE topic_id=%s AND status='published' AND draft_id<>%s", (topic['id'], draft_id))
+        for old in previous:
+            tx.execute("UPDATE news_drafts SET status='changes_requested',approved_by=NULL,approved_at=NULL WHERE id=%s", (old['draft_id'],))
+            self.review_log(tx, old['draft_id'], 'unpublished', editor, '새 수정본으로 교체')
+        tx.execute("UPDATE news_publications SET status='unpublished',unpublished_at=NOW(),retraction_reason='새 수정본으로 교체' WHERE topic_id=%s AND status='published' AND draft_id<>%s", (topic['id'], draft_id))
+        publication = tx.one('SELECT id FROM news_publications WHERE draft_id=%s', (draft_id,))
+        if publication:
+            ident = publication['id']
+            tx.execute("UPDATE news_publications SET status='published',published_at=NOW(),unpublished_at=NULL,retraction_reason=NULL WHERE id=%s", (ident,))
+        else:
+            ident = tx.insert("INSERT INTO news_publications(topic_id,draft_id,slug,status,published_at) VALUES(%s,%s,%s,'published',NOW())", (topic['id'], draft_id, 'news-' + str(topic['id']) + '-' + str(draft_id)))
+        tx.execute("UPDATE news_drafts SET status='published' WHERE id=%s", (draft_id,))
+        self.review_log(tx, draft_id, 'published', editor, '사람이 원문을 대조한 검증본 공개', digest, draft['content_hash'])
+        return {'ok': True, 'id': ident, 'status': 'published'}
+
+    # 화면의 확인 한 번을 사람의 기사 전체 대조 기록으로 남깁니다. AI가 검증한 것으로 기록하지 않습니다.
+    # 문장 상태·승인 이력·공개 저장 중 하나라도 실패하면 이 트랜잭션 전체가 취소됩니다.
+    def verify_and_save(self, draft_id, data, editor):
+        need(data.get('source_checked') is True, '원문 대조 확인을 체크하세요.', 422)
+        with self.db.transaction() as tx:
+            draft, topic = self.draft(tx, draft_id, True)
+            self.expected(draft, data['expected_content_hash'])
+            if draft['status'] == 'rejected':
+                raise NewsError('반려된 기사는 내용을 수정한 새 버전으로 검증하세요.')
+            if any(c['status'] == 'contradicted' for c in draft['claims']):
+                raise NewsError('불일치로 표시한 문장을 수정한 뒤 다시 검증하세요.')
+            # 기존의 근거·시연 제한·제목/본문 일치 검사를 재사용합니다. 개별 체크 대신 전체 대조를 확인합니다.
+            checked = {**draft, 'claims': [{**c, 'status': 'supported'} for c in draft['claims']]}
+            digest = self.approvable(tx, checked, topic)
+            facts, _ = self.sheet(tx, topic)
+            keys = {f['fact_key'] for f in facts}
+            need(keys and all(set(c['fact_keys']) <= keys for c in draft['claims']), '현재 검증된 Fact 근거를 연결하세요.', 409)
+            approval = tx.one("SELECT content_sha256,fact_snapshot_sha256 FROM news_reviews WHERE draft_id=%s AND action='approved' ORDER BY id DESC LIMIT 1", (draft_id,))
+            existing = tx.one("SELECT id FROM news_publications WHERE draft_id=%s AND status='published'", (draft_id,))
+            if (draft['status'] == 'published' and existing and approval
+                    and approval['content_sha256'] == draft['content_hash'] and approval['fact_snapshot_sha256'] == digest):
+                return {'ok': True, 'id': existing['id'], 'status': 'published', 'already_saved': True}
+            note = data.get('note') or '원문과 기사 제목·본문의 사실·시점·지역·출처 이용 조건을 대조했습니다.'
+            tx.execute("UPDATE news_claims SET status='supported',check_note=%s,checked_at=NOW() WHERE draft_id=%s",
+                       (editor + ': 전체 원문 대조 — ' + note[:600], draft_id))
+            tx.execute("UPDATE news_drafts SET status='approved',approved_by=%s,approved_at=NOW() WHERE id=%s", (editor, draft_id))
+            self.review_log(tx, draft_id, 'approved', editor, '간편 원문 대조 확인: ' + note, digest, draft['content_hash'])
+            return self.store_publication(tx, draft, topic, digest, editor)
 
     # 중단 사유와 이력을 남기고 공개 상태를 해제합니다. 재게시하려면 다시 승인해야 합니다.
     def unpublish(self, draft_id, data, editor):

@@ -237,6 +237,10 @@ def main():
                  '실제 공개 행사 CSV로 **출처 3건·Fact 후보 8건·근거 연결 8건**을 저장했습니다. 출처 편집 화면의 입력 항목도 확인했습니다. **AI 생성·Fact 검증 완료·승인·게시는 시연하지 않았습니다.**',
                  '종로 지역 뉴스 주제를 만들고 CSV를 가져와 출처와 검증 대기 Fact를 확인한 실제 화면')
             recorded = datetime.now(timezone(timedelta(hours=9)))
+            manifest_file = ASSETS / 'demo-recordings.json'
+            previous = json.loads(manifest_file.read_text(encoding='utf-8')) if manifest_file.exists() else {}
+            updated_files = {item['file'] for item in recordings}
+            recordings += [item for item in previous.get('recordings', []) if item['file'] not in updated_files and (ROOT / item['file']).is_file()]
             manifest = {'recorded_at': recorded.isoformat(timespec='seconds'),
                         'environment': f'{recorded:%Y-%m-%d} {platform.system()} Chromium {browser.version} · Node.js/실제 FastAPI · MySQL {mysql_version}의 **격리된 임시 테스트 DB**에서 녹화했습니다. 운영 PC의 실행 결과와 구분합니다. OpenAI·노션은 호출하지 않았습니다.',
                         'recordings': recordings}
