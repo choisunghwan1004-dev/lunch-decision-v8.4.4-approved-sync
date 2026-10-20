@@ -188,7 +188,7 @@ def main():
             page.get_by_role('button', name='Fact 등록', exact=True).click()
             dialog = page.locator('dialog:visible')
             dialog.locator('[name=fact_key]').fill('EVENT_DATE')
-            dialog.locator('[name=fact_type]').select_option('date')
+            dialog.locator('[name=fact_type]').select_option('date_range')
             dialog.locator('[name=value_text]').fill('신주쿠구의 테스트 행사는 2026년 11월 1일 개최됩니다.')
             dialog.locator('[name=event_start]').fill('2026-11-01')
             dialog.get_by_role('button', name='Fact 저장').click()

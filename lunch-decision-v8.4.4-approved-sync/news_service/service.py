@@ -29,7 +29,8 @@ def public_events(facts):
     """검증된 날짜 Fact의 구조화된 일정을 공개합니다. 본문에서 날짜를 추측하지 않습니다."""
     events, seen = [], set()
     for fact in facts:
-        if fact.get('fact_type') != 'date' or not fact.get('event_start'):
+        # CSV·JSON의 행사 기간은 date_range입니다. 관리자에서 입력한 단일 날짜도 같은 경로로 표시합니다.
+        if fact.get('fact_type') not in ('date', 'date_range') or not fact.get('event_start'):
             continue
         start = str(fact['event_start'])
         end = str(fact.get('event_end') or fact['event_start'])

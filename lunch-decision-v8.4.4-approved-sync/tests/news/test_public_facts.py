@@ -130,10 +130,11 @@ def test_feed_combines_articles_and_facts_with_filter_and_limit(newsroom):
     assert client.get('/public/feed', headers={'x-news-internal-token': 'wrong'}).status_code == 403
 
 
-def test_event_dates_are_structured_and_candidate_dates_are_not_public(newsroom):
+@pytest.mark.parametrize('fact_type', ['date', 'date_range'])
+def test_event_dates_are_structured_and_candidate_dates_are_not_public(newsroom, fact_type):
     client, _ = newsroom
     topic, source, fact = fact_only(client)
-    call(client, 'PUT', f'/topics/{topic}/facts/{fact}', {**FACT, 'event_end': '2026-11-03'})
+    call(client, 'PUT', f'/topics/{topic}/facts/{fact}', {**FACT, 'fact_type': fact_type, 'event_end': '2026-11-03'})
     call(client, 'POST', f'/topics/{topic}/facts', {
         **FACT, 'fact_key': 'UNVERIFIED_DATE', 'value_text': '검증하지 않은 12월 행사',
         'event_start': '2026-12-01', 'event_end': None}, 201)
