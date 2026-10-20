@@ -4,9 +4,11 @@
 
 """Internal FastAPI service; browser access goes through the existing Node session."""
 import hmac
+import json
 import logging
 import os
 import re
+from pathlib import Path
 from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, Header, Query
@@ -69,6 +71,15 @@ async def service_error(_, error):
 
 
 AUTH = [Depends(auth)]
+
+# 시작할 때 읽어 둡니다. 파일만 덮어쓰고 옛 Python 프로세스를 계속 쓰면 진단에서 구분됩니다.
+RELEASE = json.loads(Path(__file__).with_name('release.json').read_text(encoding='utf-8'))
+
+
+@app.get('/public/version', dependencies=AUTH)
+def public_version():
+    # DB·OpenAI·노션을 호출하지 않는 읽기 전용 설치 진단입니다. 비밀 설정은 반환하지 않습니다.
+    return RELEASE
 
 
 # 원문 API 오류 대신 안전한 코드와 해결 방법을 관리자에게 전달합니다.
@@ -245,10 +256,10 @@ def public_feed(district_id: int | None = Query(None, gt=0), limit: int = Query(
 
 
 @app.get('/public/facts/{topic_id}', dependencies=AUTH)
-def public_facts(topic_id: int, service: NewsService = Depends(get_service)):
-    return service.public_facts(topic_id=topic_id)
+def public_facts(topic_id: int, district_id: int | None = Query(None, gt=0), service: NewsService = Depends(get_service)):
+    return service.public_facts(topic_id=topic_id, district_id=district_id)
 
 
 @app.get('/public/{publication_id}', dependencies=AUTH)
-def public_detail(publication_id: int, service: NewsService = Depends(get_service)):
-    return service.public(publication_id=publication_id)
+def public_detail(publication_id: int, district_id: int | None = Query(None, gt=0), service: NewsService = Depends(get_service)):
+    return service.public(publication_id=publication_id, district_id=district_id)

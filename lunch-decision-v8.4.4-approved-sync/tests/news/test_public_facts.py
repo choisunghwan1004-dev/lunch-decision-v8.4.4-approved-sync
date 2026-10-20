@@ -128,3 +128,74 @@ def test_feed_combines_articles_and_facts_with_filter_and_limit(newsroom):
     call(client, 'GET', '/public/feed?limit=31', expected=422)
     call(client, 'GET', '/public/feed?district_id=0', expected=422)
     assert client.get('/public/feed', headers={'x-news-internal-token': 'wrong'}).status_code == 403
+
+
+def test_event_dates_are_structured_and_candidate_dates_are_not_public(newsroom):
+    client, _ = newsroom
+    topic, source, fact = fact_only(client)
+    call(client, 'PUT', f'/topics/{topic}/facts/{fact}', {**FACT, 'event_end': '2026-11-03'})
+    call(client, 'POST', f'/topics/{topic}/facts', {
+        **FACT, 'fact_key': 'UNVERIFIED_DATE', 'value_text': '검증하지 않은 12월 행사',
+        'event_start': '2026-12-01', 'event_end': None}, 201)
+    verify(client, topic, fact)
+    events = call(client, 'GET', f'/public/facts/{topic}?district_id=1')['events']
+    assert events == [{'label': FACT['value_text'], 'start_date': '2026-11-01', 'end_date': '2026-11-03'}]
+
+
+def test_single_day_and_news_without_dates(newsroom):
+    client, _ = newsroom
+    topic, _, fact = fact_only(client)
+    call(client, 'PUT', f'/topics/{topic}/facts/{fact}', {**FACT, 'event_end': None})
+    verify(client, topic, fact)
+    event = call(client, 'GET', '/public/feed')[0]['events'][0]
+    assert event['start_date'] == event['end_date'] == '2026-11-01'
+    call(client, 'PUT', f'/topics/{topic}/facts/{fact}', {
+        'fact_key': 'NOTICE', 'fact_type': 'text', 'value_text': '일정이 없는 일반 지역 소식입니다.'})
+    verify(client, topic, fact)
+    assert call(client, 'GET', '/public/feed')[0]['events'] == []
+
+
+def test_article_calendar_only_includes_facts_linked_to_its_claims(newsroom):
+    client, _ = newsroom
+    topic, source, fact = fact_only(client)
+    unused = call(client, 'POST', f'/topics/{topic}/facts', {
+        **FACT, 'fact_key': 'UNUSED_EVENT', 'value_text': '다른 행사 일정입니다.',
+        'event_start': '2027-01-01', 'event_end': '2027-01-02'}, 201)['id']
+    call(client, 'POST', f'/topics/{topic}/facts/{unused}/evidence', {
+        'source_id': source, 'excerpt_reference': '첫 문단', 'evidence_note': '일정 대조'})
+    verify(client, topic, fact)
+    verify(client, topic, unused)
+    assert len(call(client, 'GET', '/public/feed')[0]['events']) == 2
+    draft = call(client, 'POST', f'/topics/{topic}/generate', {}, 201)['id']
+    publication = publish(client, draft)
+    events = call(client, 'GET', f'/public/{publication["id"]}')['events']
+    assert len(events) == 1 and events[0]['start_date'] == '2026-11-01'
+
+
+def test_public_details_respect_the_selected_district(newsroom):
+    client, _ = newsroom
+    korea, _, first = fact_only(client)
+    japan, _, second = fact_only(client, district=2)
+    verify(client, korea, first)
+    verify(client, japan, second)
+    call(client, 'GET', f'/public/facts/{korea}?district_id=2', expected=404)
+    assert call(client, 'GET', f'/public/facts/{korea}?district_id=1')['district_id'] == 1
+    draft = call(client, 'POST', f'/topics/{japan}/generate', {}, 201)['id']
+    publication = publish(client, draft)
+    call(client, 'GET', f'/public/{publication["id"]}?district_id=1', expected=404)
+    assert call(client, 'GET', f'/public/{publication["id"]}?district_id=2')['district_id'] == 2
+    call(client, 'GET', f'/public/facts/{korea}?district_id=0', expected=422)
+
+
+def test_release_diagnostic_needs_auth_but_not_database_or_ai(newsroom):
+    from news_service.app import app, get_service, RELEASE
+    client, _ = newsroom
+    original = app.dependency_overrides[get_service]
+    def never_create_service():
+        pytest.fail('설치 버전 조회가 DB·AI를 초기화하면 안 됩니다.')
+    app.dependency_overrides[get_service] = never_create_service
+    try:
+        assert call(client, 'GET', '/public/version') == RELEASE
+        assert client.get('/public/version', headers={'x-news-internal-token': 'wrong'}).status_code == 403
+    finally:
+        app.dependency_overrides[get_service] = original

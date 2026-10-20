@@ -9,6 +9,8 @@
   const el = (id) => document.getElementById(id),
     root = el("news");
   if (!root) return;
+  // 이전 파일을 제공하는 서버를 '19_뉴스_화면확인.bat'에서 구분하는 화면 버전입니다.
+  root.dataset.newsView = 'location-news-v1';
   const escape = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -231,7 +233,7 @@
       : "출처와 Fact를 저장한 뒤 원문 대조로 Fact를 검증하세요.";
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
- <section class="news-block" aria-label="메인 노출 상태"><h3>메인 노출 상태</h3><p>출처 ${sources.length}건 · Fact ${facts.length}건 / 검증 ${verified}건 · 기사 ${drafts.length}건 / 검증 저장 ${published}건</p><p>${escape(nextStep)}</p><a href="/#regionalNews" target="_blank" rel="noopener noreferrer">지역 소식 확인 ↗</a></section>
+ <section class="news-block" aria-label="메인 노출 상태"><h3>메인 노출 상태</h3><p>출처 ${sources.length}건 · Fact ${facts.length}건 / 검증 ${verified}건 · 기사 ${drafts.length}건 / 검증 저장 ${published}건</p><p>${escape(nextStep)}</p><a href="/?news_district_id=${encodeURIComponent(topic.district_id)}#regionalNews" target="_blank" rel="noopener noreferrer">이 지역 소식 확인 ↗</a></section>
  <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><div><h3>3. 기사 · 원문 비교·검증 저장</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">원문 비교·검증</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;

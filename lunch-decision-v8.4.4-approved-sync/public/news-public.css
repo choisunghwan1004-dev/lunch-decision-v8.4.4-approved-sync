@@ -85,6 +85,17 @@
   cursor: pointer;
   font-weight: 800;
 }
+.news-public-card .news-event-date, .news-event-list {
+  background: #eef2ff;
+  color: #3730a3;
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-weight: 700;
+}
+.news-public-card .news-updated { margin: 0 0 14px; }
+.news-event-list p { font-size: 14px; line-height: 1.6; font-weight: 400; }
+#regionalNewsRegion { font-weight: 700; color: #334155; }
 .news-public-dialog {
   background: white;
   color: #172033;

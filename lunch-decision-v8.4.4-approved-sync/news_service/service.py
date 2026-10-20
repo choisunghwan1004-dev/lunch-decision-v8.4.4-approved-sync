@@ -25,6 +25,21 @@ def need(value, message, status=404):
     return value
 
 
+def public_events(facts):
+    """검증된 날짜 Fact의 구조화된 일정을 공개합니다. 본문에서 날짜를 추측하지 않습니다."""
+    events, seen = [], set()
+    for fact in facts:
+        if fact.get('fact_type') != 'date' or not fact.get('event_start'):
+            continue
+        start = str(fact['event_start'])
+        end = str(fact.get('event_end') or fact['event_start'])
+        key = (fact['value_text'], start, end)
+        if key not in seen:
+            events.append({'label': fact['value_text'], 'start_date': start, 'end_date': end})
+            seen.add(key)
+    return sorted(events, key=lambda event: (event['start_date'], event['end_date'], event['label']))
+
+
 # HTTP나 화면과 분리된 뉴스 업무 객체입니다. DB와 AI 생성기를 교체할 수 있어 독립 테스트가 가능합니다.
 class NewsService:
     def __init__(self, database=None, generator=None):
@@ -477,11 +492,15 @@ class NewsService:
                     FROM news_sources s JOIN news_fact_evidence e ON e.source_id=s.id
                     JOIN news_claim_facts f ON f.fact_id=e.fact_id JOIN news_claims c ON c.id=f.claim_id
                     WHERE c.draft_id=%s ORDER BY s.id''', (draft['id'],))
+                # 기사에 실제 연결된 날짜 Fact만 일정으로 보여 줍니다. 같은 주제의 다른 행사는 섞지 않습니다.
+                event_facts = tx.all('''SELECT DISTINCT f.id,f.fact_type,f.value_text,f.event_start,f.event_end
+                    FROM news_facts f JOIN news_claim_facts cf ON cf.fact_id=f.id
+                    JOIN news_claims c ON c.id=cf.claim_id WHERE c.draft_id=%s AND f.status='verified' ''', (draft['id'],))
                 output.append({'id': row['id'], 'slug': row['slug'], 'title': draft['title'],
                                'summary': draft['summary_text'], 'body': draft['body_text'],
                                'district_id': topic['district_id'], 'region_name': topic['region_name'],
                                'category': topic['category'], 'published_at': row['published_at'],
-                               'sources': sources, 'ai_assisted': True})
+                               'sources': sources, 'events': public_events(event_facts), 'ai_assisted': True})
                 if len(output) >= limit:
                     break
             if publication_id:
@@ -533,7 +552,8 @@ class NewsService:
                     'summary': body[:280] + ('…' if len(body) > 280 else ''), 'body': body,
                     'district_id': topic['district_id'], 'region_name': topic['region_name'],
                     'category': topic['category'], 'published_at': max(f['verified_at'] for f in visible),
-                    'sources': list(sources.values()), 'fact_count': len(visible), 'ai_assisted': False})
+                    'sources': list(sources.values()), 'events': public_events(visible),
+                    'fact_count': len(visible), 'ai_assisted': False})
             # 불완전한 Fact를 제외한 실제 공개 시각으로 정렬한 다음 개수 제한을 적용합니다.
             output.sort(key=lambda item: (str(item['published_at']), item['id']), reverse=True)
             if topic_id is not None:

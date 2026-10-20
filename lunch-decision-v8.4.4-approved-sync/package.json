@@ -28,7 +28,8 @@
     "news:setup": "python -m news_service.setup --init-env",
     "news:run": "python -m uvicorn news_service.app:app --host 127.0.0.1 --port 8001",
     "news:test": "python -m pytest tests/news -q",
-    "test:news-proxy": "node --test tests/news-proxy.test.js"
+    "test:news-proxy": "node --test tests/news-proxy.test.js",
+    "news:doctor": "node scripts/news-ui-doctor.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

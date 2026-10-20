@@ -27,6 +27,11 @@ function applyLocationSelection(){
   const districtRow=LOCATION_DATA.find(x=>String(x.id)===String($('districtId')?.value));const cityId=Number(areaRow?.legacy_city_id||townRow?.legacy_city_id||districtRow?.legacy_city_id||0);
   if($('cityId'))$('cityId').value=cityId;
   if($('areaId')){if(areaRow?.legacy_area_id)$('areaId').dataset.legacyAreaId=areaRow.legacy_area_id;else delete $('areaId').dataset.legacyAreaId;}
+  // 뉴스도 같은 실제 districts PK를 사용합니다. 가상 옵션 ID나 GPS 좌표를 보내지 않습니다.
+  // 자식 선택을 비운 순간에는 0을 알려 이전 지역 기사가 남지 않게 합니다.
+  const news=$('regionalNews');
+  if(news){news.dataset.districtId=String(cityId);news.dataset.regionName=cityId?['countryId','provinceId','districtId'].map(id=>$(id)?.selectedOptions[0]?.textContent||'').filter(Boolean).join(' / '):'';}
+  window.dispatchEvent(new CustomEvent('main-region-changed'));
 }
 // 서버의 공통 지역 목록을 읽고 단계별 change 이벤트 및 저장된 선택을 복원합니다.
 async function loadLocations(){
@@ -64,6 +69,14 @@ async function loadLocations(){
       if($('travelCity')&&district)$('travelCity').value=district.legacy_city_id;
     }
     if(!area){const kr=LOCATION_DATA.find(x=>x.level==='country'&&x.code==='KR');if(kr){$('countryId').value=kr.id;$('countryId').dispatchEvent(new Event('change'));}}
+
+    // 관리자의 '지역 소식 확인' 링크는 해당 주제의 시군구를 메인 선택에도 복원합니다.
+    // URL 값은 목록의 실제 PK와 대조하며 없는 지역이면 기존 선택을 유지합니다.
+    const requested=new URLSearchParams(window.location.search).get('news_district_id');
+    const district=/^[1-9]\d*$/.test(requested||'')?districts.find(x=>String(x.legacy_city_id)===requested):null;
+    const province=LOCATION_DATA.find(x=>x.id===district?.parent_id);
+    const country=LOCATION_DATA.find(x=>x.id===province?.parent_id);
+    if(district&&province&&country){for(const [id,row] of [['countryId',country],['provinceId',province],['districtId',district]]){$(id).value=row.id;$(id).dispatchEvent(new Event('change'));}}
 
   }catch(e){console.error('[locations]',e);const el=$('provinceId');if(el){el.innerHTML='<option>지역 조회 오류: 관리자에서 데이터 확인</option>';el.disabled=true;}}
 }

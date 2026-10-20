@@ -1,5 +1,17 @@
 # 검증한 Fact·뉴스가 지역 소식에 보이지 않을 때
 
+## 위치별 뉴스·행사일정 추가·변경 (2026-10-20)
+
+| 변경 항목 | 변경 전 | 변경 후 |
+| --- | --- | --- |
+| 메인 조회 | 지역과 무관한 통합 목록 | 상단에서 선택한 실제 시군구의 검증 소식·기사 최신 30건 |
+| 행사일정 | 본문에만 있던 날짜 | 검증된 날짜 Fact의 시작일·종료일을 카드·상세에 별도 표시 |
+| 상태 변경·화면 적용 | 이전 파일/서버 여부를 수동 확인 | 상태 변경 항목 없음, 19번 진단으로 파일·제공 화면·Python 버전 비교 |
+| DB·수집·예약 | 기존 MySQL·원문 수동/CSV/JSON·16시 초안 예약 | 구조·예약 유지, 추가 SQL 없음, 자동 수집·자동 검증·자동 게시 없음 |
+
+[기능·화면·DB·수집·환경 1~5 보완 및 적용 순서](NEWS_LOCATION_2026-10-20.md). 아래의 과거 검증 기록과 이력은 당시 결과를 보존합니다.
+
+
 ## 추가·변경 내용 (2026-10-20)
 
 | 변경 항목 | 변경 전 | 변경 후 |
@@ -11,7 +23,7 @@
 
 현재 메인은 **지역 소식** 제목과 **새로고침**만 표시한다. 오른쪽 **점심 지역·여행 지역** 버튼과 **점심과 여행, 지역 소식** 제목은 이전 화면이다. 첨부 화면이 이전 UI라는 것은 확인할 수 있으나, 사용자 PC의 파일·실행 프로세스·브라우저 중 어느 곳이 이전 버전인지는 아래 확인이 필요하다.
 
-기존 조회는 `news_publications`에 최종 저장된 기사만 읽었다. 따라서 **Fact 검증 완료만 한 자료는 메인에 나오지 않았다.** 새 화면은 `GET /api/news/public/feed?limit=30`으로 검증된 Fact 소식과 검증·저장 기사를 함께 읽는다. 점심·여행 지역으로 필터링하지 않는다. Fact 공개 조회는 OpenAI를 호출하지 않는다.
+기존 조회는 `news_publications`에 최종 저장된 기사만 읽었다. 따라서 **Fact 검증 완료만 한 자료는 메인에 나오지 않았다.** 새 화면은 `GET /api/news/public/feed?district_id=1&limit=30`으로 검증된 Fact 소식과 검증·저장 기사를 함께 읽는다. 상단의 선택 시군구로 필터링한다. 여행 도시 선택은 영향을 주지 않는다. Fact 공개 조회는 OpenAI를 호출하지 않는다.
 
 ## 자료에 따른 표시
 
@@ -27,6 +39,17 @@
 
 자료를 고치려면 기존의 **수정·근거 연결·원문 대조·삭제**를 사용한다. 별도 상태 변경 항목은 없다. 자료를 실제 원문과 비교하는 작업은 사람이 수행한다. 원문 URL을 자동 수집하거나 AI가 진위를 판정하는 기능은 추가하지 않았다.
 
+## 최신 업데이트 적용 순서
+
+이미 설치한 프로젝트는 업데이트 ZIP의 `lunch-news-location-update` 안 내용을 **기존 package.json이 있는 폴더에 덮어씁니다.** ZIP에는 `.env`·`.venv`·`node_modules`·백업·사용자 데이터가 없습니다. 기존 설정과 설치 환경을 유지하고, 필요한 경우 덮어쓸 코드만 별도 복사해 보관합니다. 새 폴더에 설치한다면 `.env`만 기존 폴더에서 복사하고 Python 환경은 새로 준비합니다.
+
+1. 기존 Node·FastAPI 창에서 각각 **Ctrl+C**로 종료합니다.
+2. 최신 파일을 적용한 같은 폴더의 **09_뉴스_서버시작.bat**을 실행합니다.
+3. 별도로 **19_뉴스_화면확인.bat**을 실행합니다. 8개 검사가 모두 `PASS`이고 버전이 `20261020-location-1`이어야 합니다. `npm run news:doctor`도 같습니다.
+4. 사용자·관리자 탭에서 **Ctrl+F5**를 누릅니다. 메인 상단에서 시군구를 선택합니다. 관리자에서는 **이 지역 소식 확인** 링크로 해당 지역을 바로 열 수 있습니다.
+
+진단은 `.env`의 PORT(기본 3100)를 읽고 키·비밀번호를 출력하지 않습니다. 파일 검사만 하려면 `node scripts/news-ui-doctor.js --local`을 사용합니다. 진단 실패 시 표시된 폴더·주소·FAIL 항목을 확인합니다. Node 또는 Python 버전이 다르면 두 서버를 같은 최신 폴더에서 다시 실행합니다. 임의 PID 종료·SQL 초기화는 수행하지 않습니다.
+
 ## 최신 화면을 실행하고 있는지 확인
 
 ### 1. 실행할 폴더의 파일 확인
@@ -35,7 +58,7 @@
 
 ```powershell
 Test-Path .\server.js
-Select-String -Path .\public\index.html -SimpleMatch 'data-news-view="verified-facts-v1"'
+Select-String -Path .\public\index.html -SimpleMatch 'data-news-view="location-news-v1"'
 Select-String -Path .\news_service\app.py -SimpleMatch "@app.get('/public/feed'"
 ```
 
@@ -59,8 +82,8 @@ Node만 재시작하면 Python의 새 Fact 조회 경로가 반영되지 않는�
 
 ```powershell
 $page = Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:3100/'
-$page.Content -match 'data-news-view="verified-facts-v1"'
-Invoke-RestMethod 'http://127.0.0.1:3100/api/news/public/feed?limit=30'
+$page.Content -match 'data-news-view="location-news-v1"'
+Invoke-RestMethod 'http://127.0.0.1:3100/api/news/public/feed?district_id=1&limit=30'
 ```
 
 | 결과 | 다음 행동 |
@@ -82,6 +105,8 @@ Invoke-RestMethod 'http://127.0.0.1:3100/api/news/public/feed?limit=30'
 4. Fact를 수정하면 후보로 돌아가 해당 내용이 빠지고, 재검증 후 다시 보여야 한다.
 5. 선택적으로 AI 기사를 만들고 원문 비교·확인 한 개·검증 완료·저장을 진행한다. 같은 주제가 한 개의 기사 카드로 바뀌어야 한다.
 6. 기사 공개 중단 후 Fact 카드로 다시 나타나지 않아야 한다. 재공개는 기사 검증·저장으로 진행한다.
-7. 점심·여행 지역을 바꿔도 뉴스가 유지되고, 모바일에서 본문·출처를 읽을 수 있어야 한다.
+7. 메인의 국가·시/도·시군구를 바꾸면 해당 지역 소식만 보여야 한다. 상위 지역을 비우면 이전 카드가 없어야 하고, 빠른 전환에도 이전 응답이 섞이지 않아야 한다. 여행 도시 변경은 뉴스에 영향을 주지 않아야 한다.
+8. 검증된 날짜 Fact의 행사일정이 카드·상세에 표시되고 검증·게시 시각과 구별되어야 한다.
+9. 관리자에 상태 변경 버튼이 없고 19번 진단이 모두 PASS여야 한다. 모바일 가로 넘침도 확인한다.
 
 자동 검사는 [Fact 피드 테스트](../tests/news/test_public_facts.py), [기사 저장 테스트](../tests/news/test_simple_review.py), [실제 DB·브라우저 통합 검사](../tests/news/browser_smoke.py)를 사용한다. 사용자 PC의 실제 DB 상태를 직접 확인한 결과는 아니다.
