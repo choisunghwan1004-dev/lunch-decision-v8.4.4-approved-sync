@@ -1,5 +1,37 @@
 # 뉴스 통합 검증 기록
 
+## 2026-10-20 ChatGPT 참고 검수와 사람 체크
+
+| 검사 | 실제 결과 |
+| --- | --- |
+| 실제 MySQL 8.0.36 전체 | **129개 통과**, 기존 104개 + 참고 검수 25개. 격리 `news_test_*` DB만 생성·삭제 |
+| 새 API·DB | 검수·사용량 저장/재사용, 승인·문장 사람 검토·공개 미변경, 잘못된 해시/확인·근거 변경·중복 실행 차단, 중단 기록·오류 처리 |
+| 결과 검증 | 네 항목·제목/문장 누락·중복·연결되지 않은 Fact/출처·근거 없는 일치 거절. 이용 조건은 사람 확인으로 표시 |
+| 사람 검수 | 네 체크 승인 이력·현재 AI ID 저장, 일부 체크 422, AI 불일치 시 재확인 처리 메모, 새 수정본의 이전 결과 미상속, 키 없어도 수동 검수 가능 |
+| 실제 OpenAI SDK + 모의 HTTP | 모델·strict JSON Schema·`store=false` 요청, 비공개 사람 메모 미전송, 정상·불완전·잘못된 JSON 처리. 유료 공급자 호출 아님 |
+| Node 전체 | **40개 통과**, 로그인·동일 출처 보호·`ai-review` 프록시 전달 및 기존 점심·여행·동기화·문서·진단 |
+| 실제 Node/FastAPI/MySQL/Chromium | 키 미설정, 예시 펼치기, 모의 AI 참고 결과 저장·재사용, 사람 체크 0/4 유지·부분 체크 차단·4/4 저장, 429 안내, 열린 메인 반영·공개 중단·한국/일본·모바일·진단 8개 통과 |
+| 문서·실행 화면 | 구문·README 생성/최신 검사·문서 생성기 5개·로컬 링크·차이 검사. 새 검수 GIF 4단계 12초, 기존 공개 GIF 8단계. Word 18쪽·27개 표·5개 이미지 렌더링·전체 페이지 확인 |
+| 미실행 | 실제 유료 OpenAI·모델 권한·노션 쓰기·사용자 운영 DB·Windows BAT·예약 정시 실행 |
+
+이번 기능은 SQL·테이블·컬럼·의존성 추가가 없다. 모의 AI는 테스트 전용 앱에서만 주입하며 운영 경로에 모의 성공 기능을 두지 않는다. Python TestClient에 기존 httpx 폐기 예정 경고 1개가 있었으며 실패는 없다.
+
+```powershell
+npm run test:ui
+npm run check
+npm run test:docs
+npm run docs:news:check
+.\.venv\Scripts\python.exe -m pytest tests/news -q
+# 실제 MySQL 검사는 테스트 DB 생성/삭제 권한과 로컬 DB 연결 설정 필요
+$env:NEWS_TEST_MYSQL='1'
+.\.venv\Scripts\python.exe -m pytest tests/news -q
+Remove-Item Env:NEWS_TEST_MYSQL
+# 브라우저 설치 후 테스트 전용 DB로 실행. 운영 DB 이름은 사용하지 않음
+.\.venv\Scripts\python.exe tests/news/browser_smoke.py
+```
+
+[검수 기능·예시·실행 안내](docs/NEWS_AI_REVIEW.md). 아래 기록은 각 변경 당시 결과를 보존한다.
+
 ## 2026-10-20 최신 보완 검증 행사 기간과 뉴스 세팅 첨부
 
 | 검사 | 결과 |

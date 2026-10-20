@@ -1,4 +1,6 @@
 {
-  "revision": "20261020-location-1",
-  "view": "location-news-v1"
+  "revision": "20261020-review-1",
+  "view": "location-news-v1",
+  "admin_view": "assisted-review-v1",
+  "admin_asset": "852review1"
 }

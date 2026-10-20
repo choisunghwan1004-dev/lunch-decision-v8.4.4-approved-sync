@@ -45,8 +45,9 @@ def main():
     processes, handles = [], []
     ARTIFACTS.mkdir(exist_ok=True)
     publication_frames = []
+    review_frames = []
     # 선택한 경우에만 공개할 GIF를 만듭니다. 테스트 AI 응답이라는 표시는 모든 프레임에 남깁니다.
-    def capture_publication(page, label):
+    def capture_publication(page, label, frames=None):
         if os.getenv('NEWS_RECORD_PUBLICATION') != '1':
             return
         from io import BytesIO
@@ -58,7 +59,7 @@ def main():
         draw = ImageDraw.Draw(canvas)
         draw.text((20, 8), label, font=ImageFont.truetype(font, 24), fill='white')
         draw.text((20, 40), '격리 MySQL 테스트 · 모의 AI 응답 · 실제 OpenAI 호출·운영 게시 없음', font=ImageFont.truetype(font, 17), fill='#b7d9eb')
-        publication_frames.append(canvas.quantize(colors=160))
+        (publication_frames if frames is None else frames).append(canvas.quantize(colors=160))
     try:
         cur.execute(f'CREATE DATABASE `{name}` CHARACTER SET utf8mb4')
         cur.execute(f'USE `{name}`')
@@ -201,6 +202,7 @@ def main():
             expect(page.locator('dialog:visible')).to_have_count(0)
             # 이미 열린 메인도 Fact 검증·수정 알림을 받아 다시 조회해야 합니다. AI는 아직 호출하지 않습니다.
             public_page = context.new_page()
+            public_page.on('pageerror', lambda error: errors.append(str(error)))
             public_page.goto(base + '/')
             expect(public_page.locator('#regionalNews h2')).to_have_text('지역 소식')
             expect(public_page.locator('#regionalNews')).to_have_attribute('data-news-view', 'location-news-v1')
@@ -257,21 +259,58 @@ def main():
             public_page.locator('#regionalNewsRefresh').click()
             expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
             page.get_by_role('button', name='검증 Fact로 초안 생성').click()
-            # 간편 화면에는 원문·기사, 확인 하나, 선택 메모만 있습니다.
+            # 원문/기사 배치를 유지하고, 사람이 직접 체크할 네 포인트와 유료 AI 버튼을 제공합니다.
             dialog = page.locator('dialog:visible')
             expect(dialog).to_contain_text('원문 근거')
             expect(dialog).to_contain_text('검증할 기사')
-            expect(dialog.locator('input[type=checkbox]')).to_have_count(1)
+            expect(dialog.locator('[data-human-check]')).to_have_count(4)
             expect(dialog.locator('[data-check], [data-review], [data-publish]')).to_have_count(0)
+            expect(dialog.locator('[data-ai-review]')).to_be_disabled()  # 키 없는 운영 상태
             dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
-            expect(dialog.locator('.news-error')).to_contain_text('원문 대조 확인을 체크하세요')
+            expect(dialog.locator('.news-error')).to_contain_text('사람 검수 항목 4개')
+            dialog.locator('[data-human-check]').first.check()
+            expect(dialog.locator('[data-human-progress]')).to_have_text('직접 확인 1/4')
+            dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
+            expect(dialog.locator('.news-error')).to_contain_text('사람 검수 항목 4개')
             expect(public_page.locator('#regionalNewsCards')).to_contain_text('원문 검증 소식')
-            expect(public_page.locator('#regionalNewsCards')).not_to_contain_text('신주쿠 지역 소식 안내')
-            dialog.locator('[name=source_checked]').check()
+            # API 키 상태만 대역으로 표시합니다. Python 진입점도 격리 DB 전용 검수 대역입니다.
+            dialog.get_by_role('button', name='닫기', exact=True).click()
+            page.route('**/api/news/ai/status', lambda route: route.fulfill(json={'ok':True,'model':'gpt-6-luna','key_configured':True,'model_configured':True}))
+            page.get_by_role('button', name='원문 비교·검증', exact=True).first.click()
+            dialog = page.locator('dialog:visible')
+            expect(dialog.locator('[data-human-check]:checked')).to_have_count(0)
+            dialog.locator('.news-review-point details').first.locator('summary').click()
+            expect(dialog).to_contain_text('20%')
+            dialog.locator('.news-human-review').scroll_into_view_if_needed()
+            capture_publication(page, '검수 1/4 · 잘못된 표현과 수정 예시를 보고 사람이 직접 확인', review_frames)
+            dialog.locator('[data-ai-review]').click()
+            expect(dialog.locator('[data-ai-review-result]')).to_contain_text('모의 AI 검수')
+            expect(dialog.locator('[data-ai-review-result]')).to_contain_text('사람 확인 필요')
+            expect(dialog.locator('[data-human-check]:checked')).to_have_count(0)
+            dialog.locator('[data-ai-review-result]').scroll_into_view_if_needed()
+            capture_publication(page, '검수 2/4 · AI 참고 결과는 사람 체크와 승인 상태를 바꾸지 않습니다', review_frames)
+            # 재열어도 MySQL에 저장한 결과를 읽으며, 승인·문장 상태는 그대로 미검토입니다.
+            draft_id = page.locator('#newsWorkspace [data-news-action=draft]').first.get_attribute('data-id')
+            detail = page.request.get(base + '/api/news/drafts/' + str(draft_id)).json()
+            assert detail['status']=='generated' and all(c['status']=='unverified' for c in detail['claims'])
+            assert detail['ai_review']['state']=='completed' and detail['ai_review']['current']
+            # 화면의 429 안내도 별도 응답 대역으로 확인합니다. 재클릭 성공은 DB의 완료 결과를 재사용합니다.
+            ai_path = '**/api/news/drafts/*/ai-review'
+            page.route(ai_path, lambda route: route.fulfill(status=429,json={'detail':'API 잔액 또는 예산이 부족합니다. 자동 재시도하지 않았습니다.'}))
+            dialog.locator('[data-ai-review]').click()
+            expect(dialog.locator('[data-ai-review-result]')).to_contain_text('잔액')
+            expect(dialog.locator('[data-human-check]:checked')).to_have_count(0)
+            page.unroute(ai_path)
+            dialog.locator('[data-ai-review]').click()
+            expect(dialog.locator('[data-ai-review-result]')).to_contain_text('모의 AI 검수')
+            for box in dialog.locator('[data-human-check]').all():
+                box.check()
+            expect(dialog.locator('[data-human-progress]')).to_have_text('직접 확인 4/4')
             expect(dialog.locator('.news-error')).to_have_text('')
             expect(dialog.locator('[name=note]')).to_have_value('')
             dialog.locator('[type=submit]').scroll_into_view_if_needed()
-            capture_publication(page, '지역 소식 4/8 · AI 기사는 원문 비교 후 확인 하나로 검증·저장')
+            capture_publication(page, '검수 3/4 · 사람 검수 네 항목 확인 후 검증 완료 저장', review_frames)
+            capture_publication(page, '지역 소식 4/8 · AI 참고 검수와 사람 네 포인트를 확인해 저장')
             dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
             expect(page.locator('dialog:visible')).to_have_count(0)
             expect(page.locator('#newsWorkspace')).to_contain_text('검증·저장 완료')
@@ -279,6 +318,8 @@ def main():
             expect(page.get_by_role('button', name='상태 변경', exact=True)).to_have_count(0)
             page.locator('[aria-label="메인 노출 상태"]').scroll_into_view_if_needed()
             capture_publication(page, '지역 소식 5/8 · 기사 검증·공개 저장, 상태 변경 항목 없음')
+            capture_publication(page, '검수 4/4 · 사람 검수 기록과 검증 저장 결과 확인', review_frames)
+            page.unroute('**/api/news/ai/status')
             expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 지역 소식 안내')
             expect(public_page.locator('#regionalNewsCards article')).to_have_count(1)
             expect(public_page.locator('#regionalNewsCards')).not_to_contain_text('원문 검증 소식')
@@ -321,7 +362,9 @@ def main():
             expect(public_page.locator('#regionalNewsCards').get_by_role('button')).to_have_count(0)
             page.get_by_role('button', name='원문 비교·검증', exact=True).first.click()
             dialog = page.locator('dialog:visible')
-            dialog.locator('[name=source_checked]').check()
+            expect(dialog.locator('[data-human-check]')).to_have_count(4)
+            for box in dialog.locator('[data-human-check]').all():
+                box.check()
             dialog.get_by_role('button', name='검증 완료·저장', exact=True).click()
             expect(page.locator('dialog:visible')).to_have_count(0)
             public_page.close()
@@ -359,15 +402,27 @@ def main():
                 manifest_file = ROOT / 'docs/assets/demo-recordings.json'
                 manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
                 entry = {'file': 'docs/assets/news-publication-demo.gif',
-                         'title': '지역 소식 — 선택한 시군구의 뉴스·행사일정',
+                         'title': '지역 소식 — 선택한 시군구의 뉴스·행사일정과 검수',
                          'recorded_at': '2026-10-20',
-                         'description': '격리 MySQL에서 **선택한 시군구의 검증 Fact·행사일정**을 조회하고, **모의 AI 기사**의 확인 하나·빈 메모 저장을 확인했습니다. 한국·일본 전환과 늦은 응답 무시, 관리자 상태 변경 항목 제거, 버전 진단, 공개 중단을 시험했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**',
+                         'description': '격리 MySQL에서 **선택한 시군구의 검증 Fact·행사일정**을 조회하고, **모의 AI 기사**의 참고 검수·사람 4포인트·빈 메모 저장을 확인했습니다. 한국·일본 전환과 늦은 응답 무시, 관리자 상태 변경 항목 제거, 버전 진단, 공개 중단을 시험했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**',
                          'alt': '실제 테스트 화면에서 Fact 검증만으로 지역 소식 표시 후 모의 AI 기사의 검증 저장·시군구 전환·행사일정·출처를 확인한 여덟 단계'}
                 manifest['recordings'] = [r for r in manifest['recordings'] if r['file'] != entry['file']] + [entry]
                 manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
                 print(f'Publication GIF: {len(publication_frames)} frames, {file.stat().st_size} bytes', flush=True)
+            if review_frames:
+                file = ROOT / 'docs/assets/news-ai-review-demo.gif'
+                review_frames[0].save(file, save_all=True, append_images=review_frames[1:], duration=3000, loop=0, optimize=True, disposal=2)
+                manifest_file = ROOT / 'docs/assets/demo-recordings.json'
+                manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
+                entry = {'file':'docs/assets/news-ai-review-demo.gif', 'title':'ChatGPT 참고 검수와 사람 검수 포인트',
+                         'recorded_at':'2026-10-20',
+                         'description':'격리 MySQL·실제 브라우저에서 **검수 예시 → 모의 AI 대조 결과 → 사람 4개 직접 체크 → 저장**을 확인했습니다. AI가 사람 체크·승인을 자동 처리하지 않으며, 키 미설정·429 안내·결과 재사용도 시험했습니다. **유료 OpenAI 호출·운영 게시가 아닙니다.**',
+                         'alt':'네 가지 검수 예시와 AI 참고 결과를 읽고 사람이 직접 체크해 저장하는 실제 테스트 화면 네 단계'}
+                manifest['recordings']=[r for r in manifest['recordings'] if r['file']!=entry['file']]+[entry]
+                manifest_file.write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+                print(f'AI review GIF: {len(review_frames)} frames, {file.stat().st_size} bytes',flush=True)
             browser.close()
-        print('Browser PASS: connection recovery + KR/JP topics/race + verified Facts without AI + edit/reverify refresh + stale server error/cache + simple article save/blank memo + one card per topic + stop without Fact fallback + district filter/race + event dates + version doctor + Japan/mobile')
+        print('Browser PASS: connection recovery + KR/JP topics/race + verified Facts without AI + edit/reverify refresh + stale server error/cache + AI assisted review/human four checks/blank memo + one card per topic + stop without Fact fallback + district filter/race + event dates + version doctor + Japan/mobile')
     finally:
         for process in processes:
             process.terminate()

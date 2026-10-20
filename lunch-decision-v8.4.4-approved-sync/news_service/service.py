@@ -6,8 +6,10 @@
 """Transactional newsroom workflow; approval binds both content and evidence."""
 import hashlib
 import json
+import time
 
-from . import article_ai
+from . import article_ai, review_ai
+from .ai_runtime import NewsAIError
 from .db import Database
 from .validation import can_verify, complete_evidence, content_hash, fingerprint, parse_draft, snapshot, validate_fact, validate_source
 
@@ -43,9 +45,10 @@ def public_events(facts):
 
 # HTTP나 화면과 분리된 뉴스 업무 객체입니다. DB와 AI 생성기를 교체할 수 있어 독립 테스트가 가능합니다.
 class NewsService:
-    def __init__(self, database=None, generator=None):
+    def __init__(self, database=None, generator=None, reviewer=None):
         self.db = database or Database()
         self.generator = generator or article_ai.generate_article
+        self.reviewer = reviewer or review_ai.review_article
 
     # 주제를 읽고 지역명을 붙입니다. lock=True면 다른 쓰기 작업이 끝날 때까지 같은 주제를 기다립니다.
     def topic(self, tx, topic_id, lock=False):
@@ -89,7 +92,7 @@ class NewsService:
 
     # 누가 어떤 버전을 어떤 사유로 처리했는지 남깁니다. 승인에는 기사·근거 해시도 묶습니다.
     def review_log(self, tx, draft_id, action, editor, reason, fact_hash=None, article_hash=None):
-        tx.insert('''INSERT INTO news_reviews(draft_id,action,reviewer_key,reason,fact_snapshot_sha256,content_sha256)
+        return tx.insert('''INSERT INTO news_reviews(draft_id,action,reviewer_key,reason,fact_snapshot_sha256,content_sha256)
                      VALUES(%s,%s,%s,%s,%s,%s)''', (draft_id, action, editor, reason, fact_hash, article_hash))
 
     # 근거가 바뀌면 같은 주제의 검토·승인을 해제하고 게시를 중단합니다. 과거 기사 원문은 삭제하지 않습니다.
@@ -322,8 +325,96 @@ class NewsService:
             saved_sheet = draft.pop('fact_snapshot_json', None)
             draft['saved_fact_sheet'] = json.loads(saved_sheet) if saved_sheet else None
             draft['reviews'] = tx.all('SELECT * FROM news_reviews WHERE draft_id=%s ORDER BY id', (draft_id,))
+            draft['review_points'] = review_ai.POINTS
+            draft['ai_review'] = self.latest_ai_review(draft['reviews'], draft, digest)
             draft['publication'] = tx.one('SELECT id,status,published_at,unpublished_at,retraction_reason FROM news_publications WHERE draft_id=%s', (draft_id,))
             return draft
+
+    @staticmethod
+    def latest_ai_review(rows, draft, digest):
+        # 자동 검수는 submitted 종류의 참고 기록입니다. 사람의 approved 기록과 섞지 않습니다.
+        for row in reversed(rows):
+            try:
+                data = json.loads(row.get('reason') or '')
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(data, dict) or data.get('kind') != review_ai.KIND:
+                continue
+            return {**data, 'id': row['id'], 'created_at': row['created_at'], 'requested_by': row['reviewer_key'],
+                    'current': row['content_sha256'] == draft['content_hash']
+                        and row['fact_snapshot_sha256'] == digest == draft['fact_snapshot_sha256']}
+        return None
+
+    @staticmethod
+    def update_ai_record(tx, ident, record):
+        text = json.dumps(record, ensure_ascii=False, default=str)
+        need(len(text.encode()) < 60000, '자동 검수 기록이 너무 큽니다.', 422)
+        tx.execute('UPDATE news_reviews SET reason=%s WHERE id=%s', (text, ident))
+
+    def assisted_review(self, draft_id, data, editor):
+        """기사/근거 버전별 한 번 검수. API를 기다리는 동안 DB 연결과 행 잠금을 유지하지 않는다."""
+        need(data.get('confirmation') == 'RUN_AI_REVIEW', '자동 검수 실행 확인이 필요합니다.', 422)
+        interrupted = False
+        with self.db.transaction() as tx:
+            draft, topic = self.draft(tx, draft_id, True)
+            self.expected(draft, data['expected_content_hash'])
+            facts, digest = self.sheet(tx, topic)
+            need(facts and digest == draft['fact_snapshot_sha256'], '근거가 바뀌었습니다. 새 수정본을 만든 뒤 자동 검수하세요.', 409)
+            payload = review_ai.payload_for(topic, draft, facts)
+            need(len(facts) <= 40 and len(json.dumps(payload, ensure_ascii=False, default=str)) <= 100000,
+                 '자동 검수 자료를 Fact 40개·100,000자 이내로 정리하세요.', 422)
+            rows = tx.all("SELECT * FROM news_reviews WHERE draft_id=%s AND action='submitted' ORDER BY id", (draft_id,))
+            previous = self.latest_ai_review(rows, draft, digest)
+            if previous and previous['current']:
+                if previous['state'] == 'completed':
+                    return {'ok': True, 'cached': True, 'review': previous}
+                if previous['state'] == 'running':
+                    if time.time() - previous['started_at'] < 120:
+                        raise NewsError('자동 검수가 진행 중입니다. 창을 다시 열어 결과를 확인하세요. 중복 호출하지 않았습니다.')
+                    # 중단된 유료 호출을 자동 재시도하지 않습니다. 다음 명시적 버튼 클릭에서만 다시 요청합니다.
+                    record = {**previous, 'state': 'error', 'error_code': 'interrupted',
+                              'message': '이전 호출의 결과 기록이 없습니다. 사용량을 확인하고 필요하면 자동 검수 버튼을 다시 누르세요.'}
+                    for key in ('id', 'created_at', 'requested_by', 'current'):
+                        record.pop(key, None)
+                    self.update_ai_record(tx, previous['id'], record)
+                    interrupted = True
+            if not interrupted:
+                record = {'kind': review_ai.KIND, 'state': 'running', 'model': review_ai.MODEL, 'started_at': time.time()}
+                ident = self.review_log(tx, draft_id, 'submitted', editor, json.dumps(record), digest, draft['content_hash'])
+        if interrupted:
+            raise NewsError(record['message'])
+        try:
+            raw, usage = self.reviewer(topic, draft, facts)
+            result = review_ai.parse_review({key: raw[key] for key in ('summary', 'checks', 'claims')}, draft, facts)
+        except Exception as error:
+            safe = error if isinstance(error, NewsAIError) else NewsAIError('review_failed', '자동 검수에 실패했습니다. 기사·근거와 모델 설정을 확인하세요. 자동 재시도하지 않았습니다.')
+            with self.db.transaction() as tx:
+                self.topic(tx, topic['id'], True)
+                tx.execute("INSERT INTO news_ai_usage(topic_id,draft_id,model_name,status,error_code) VALUES(%s,%s,%s,'error',%s)",
+                           (topic['id'], draft_id, review_ai.MODEL, safe.code))
+                self.update_ai_record(tx, ident, {**record, 'state': 'error', 'error_code': safe.code, 'message': safe.message})
+            raise safe from error
+        # 공급자 응답 뒤에도 현재 기사·근거를 다시 비교합니다. 바뀐 결과는 성공으로 표시하지 않습니다.
+        changed = False
+        with self.db.transaction() as tx:
+            current, current_topic = self.draft(tx, draft_id, True)
+            _, current_digest = self.sheet(tx, current_topic)
+            changed = current['content_hash'] != draft['content_hash'] or current_digest != digest
+            usage_id = tx.insert('''INSERT INTO news_ai_usage(topic_id,draft_id,model_name,provider_request_id,
+                input_tokens,output_tokens,cached_input_tokens,status,error_code) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)''',
+                (topic['id'], draft_id, review_ai.MODEL, usage.get('request_id'), usage.get('input_tokens', 0),
+                 usage.get('output_tokens', 0), usage.get('cached_input_tokens', 0),
+                 'error' if changed else 'success', 'ReviewEvidenceChanged' if changed else None))
+            if changed:
+                record.update(state='error', error_code='ReviewEvidenceChanged', message='검수 중 기사·근거가 변경되어 결과를 폐기했습니다.', usage_id=usage_id)
+            else:
+                record.update(state='completed', result=result, usage_id=usage_id, usage={key: usage.get(key, 0) for key in ('input_tokens', 'output_tokens')})
+            self.update_ai_record(tx, ident, record)
+            rows = tx.all('SELECT * FROM news_reviews WHERE id=%s', (ident,))
+            returned = self.latest_ai_review(rows, current, current_digest)
+        if changed:
+            raise NewsError(record['message'])
+        return {'ok': True, 'cached': False, 'review': returned}
 
     # 사용자가 열어 본 내용 해시와 현재 기사 해시가 다르면 오래된 화면의 요청을 거절합니다.
     def expected(self, draft, value):
@@ -428,10 +519,14 @@ class NewsService:
         self.review_log(tx, draft_id, 'published', editor, '사람이 원문을 대조한 검증본 공개', digest, draft['content_hash'])
         return {'ok': True, 'id': ident, 'status': 'published'}
 
-    # 화면의 확인 한 번을 사람의 기사 전체 대조 기록으로 남깁니다. AI가 검증한 것으로 기록하지 않습니다.
+    # 화면의 네 사람 체크를 기사 전체 대조 기록으로 남깁니다. 구형 단일 확인 API도 호환합니다. AI 참고 검수는 별개입니다.
     # 문장 상태·승인 이력·공개 저장 중 하나라도 실패하면 이 트랜잭션 전체가 취소됩니다.
     def verify_and_save(self, draft_id, data, editor):
         need(data.get('source_checked') is True, '원문 대조 확인을 체크하세요.', 422)
+        human = data.get('human_checks')
+        if human is not None:
+            need(set(human) == set(review_ai.KEYS) and all(human[key] is True for key in review_ai.KEYS),
+                 '사람 검수 항목 4개를 모두 직접 확인하세요.', 422)
         with self.db.transaction() as tx:
             draft, topic = self.draft(tx, draft_id, True)
             self.expected(draft, data['expected_content_hash'])
@@ -443,6 +538,11 @@ class NewsService:
             checked = {**draft, 'claims': [{**c, 'status': 'supported'} for c in draft['claims']]}
             digest = self.approvable(tx, checked, topic)
             facts, _ = self.sheet(tx, topic)
+            ai_rows = tx.all("SELECT * FROM news_reviews WHERE draft_id=%s AND action='submitted' ORDER BY id", (draft_id,))
+            ai = self.latest_ai_review(ai_rows, draft, digest)
+            if ai and ai['current'] and ai['state'] == 'completed' and ai['result']['overall'] == 'fail':
+                need(human is not None and len(str(data.get('ai_issue_note') or '').strip()) >= 3,
+                     'AI 불일치 지적을 원문과 재확인하고 사람 검수 4개·처리 메모 3자 이상을 남기세요.', 422)
             keys = {f['fact_key'] for f in facts}
             need(keys and all(set(c['fact_keys']) <= keys for c in draft['claims']), '현재 검증된 Fact 근거를 연결하세요.', 409)
             approval = tx.one("SELECT content_sha256,fact_snapshot_sha256 FROM news_reviews WHERE draft_id=%s AND action='approved' ORDER BY id DESC LIMIT 1", (draft_id,))
@@ -454,7 +554,11 @@ class NewsService:
             tx.execute("UPDATE news_claims SET status='supported',check_note=%s,checked_at=NOW() WHERE draft_id=%s",
                        (editor + ': 전체 원문 대조 — ' + note[:600], draft_id))
             tx.execute("UPDATE news_drafts SET status='approved',approved_by=%s,approved_at=NOW() WHERE id=%s", (editor, draft_id))
-            self.review_log(tx, draft_id, 'approved', editor, '간편 원문 대조 확인: ' + note, digest, draft['content_hash'])
+            reason = (json.dumps({'kind': 'human_guided_review_v1', 'checks': human, 'note': note,
+                       'ai_review_id': ai['id'] if ai and ai['current'] and ai['state'] == 'completed' else None,
+                       'ai_issue_note': data.get('ai_issue_note') or ''}, ensure_ascii=False)
+                      if human is not None else '간편 원문 대조 확인: ' + note)
+            self.review_log(tx, draft_id, 'approved', editor, reason, digest, draft['content_hash'])
             return self.store_publication(tx, draft, topic, digest, editor)
 
     # 중단 사유와 이력을 남기고 공개 상태를 해제합니다. 재게시하려면 다시 승인해야 합니다.

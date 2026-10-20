@@ -141,6 +141,14 @@ class VerifyAndSaveInput(Input):
     source_checked: Literal[True]
     expected_content_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
     note: str = Field(default='', max_length=2000)
+    # 구형 클라이언트의 전체 원문 확인 계약은 유지합니다. 새 화면은 네 항목을 직접 확인해 보냅니다.
+    human_checks: ReviewChecks | None = None
+    ai_issue_note: str = Field(default='', max_length=1000)
+
+
+class AIReviewInput(Input):
+    confirmation: Literal['RUN_AI_REVIEW']
+    expected_content_hash: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
 # 게시 중단처럼 이유를 남겨야 하는 작업의 공통 입력입니다.

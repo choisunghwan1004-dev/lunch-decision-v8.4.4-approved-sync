@@ -239,6 +239,11 @@ def verify_and_save(draft_id: int, data: s.VerifyAndSaveInput, who: str = Depend
     return service.verify_and_save(draft_id, data.model_dump(), who)
 
 
+@app.post('/drafts/{draft_id}/ai-review', dependencies=AUTH)
+def assisted_review(draft_id: int, data: s.AIReviewInput, who: str = Depends(editor), service: NewsService = Depends(get_service)):
+    return service.assisted_review(draft_id, data.model_dump(), who)
+
+
 @app.post('/drafts/{draft_id}/unpublish', dependencies=AUTH)
 def unpublish(draft_id: int, data: s.ReasonInput, who: str = Depends(editor), service: NewsService = Depends(get_service)):
     return service.unpublish(draft_id, data.model_dump(), who)

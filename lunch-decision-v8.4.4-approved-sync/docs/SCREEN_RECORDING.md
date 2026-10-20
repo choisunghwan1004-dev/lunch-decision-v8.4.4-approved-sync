@@ -23,14 +23,15 @@
 
 [프로젝트 README로 돌아가기](../README.md#demo)
 
-실제 실행 단계의 화면을 **GIF 파일**로 묶어 README에 표시합니다. GIF는 움직이는 이미지이며 음성을 담지 않습니다. 2026-10-20에 Linux Chromium 134.0.6998.35 · 실제 Node/FastAPI · MySQL 8.0.36의 격리 테스트 DB에서 아래 4개 GIF를 만들었습니다. 연속 영상 대신 실제 UI를 조작한 주요 단계의 캡처를 보여줍니다. 사용자 Windows PC의 실행 성공 기록과 구분합니다.
+실제 실행 단계의 화면을 **GIF 파일**로 묶어 README에 표시합니다. GIF는 움직이는 이미지이며 음성을 담지 않습니다. 2026-10-20에 Linux Chromium 134.0.6998.35 · 실제 Node/FastAPI · MySQL 8.0.36의 격리 테스트 DB에서 아래 5개 GIF를 만들었습니다. 연속 영상 대신 실제 UI를 조작한 주요 단계의 캡처를 보여줍니다. 사용자 Windows PC의 실행 성공 기록과 구분합니다.
 
 | 파일 | 확인한 실제 동작 | 길이·크기 |
 | --- | --- | --- |
 | [lunch-demo.gif](assets/lunch-demo.gif) | 한국 종로구·일본 신주쿠구 선택과 점심 추천 결과 | 5단계 · 10.8초 · 약 1.10 MiB |
 | [travel-demo.gif](assets/travel-demo.gif) | 종로구 2일 일정, 하루 6단계·총 12단계 | 4단계 · 8.8초 · 약 0.84 MiB |
 | [news-demo.gif](assets/news-demo.gif) | 종로 주제·CSV 가져오기, 출처 3건·Fact 후보 8건·근거 연결 8건, 출처 편집 입력 항목 | 7단계 · 17.2초 · 약 1.24 MiB |
-| [news-publication-demo.gif](assets/news-publication-demo.gif) | 선택 시군구의 Fact·행사일정 → **모의 AI 응답** 기사 비교·빈 메모 저장·한국/일본 전환·출처 | 8단계 · 22.4초 · 약 1.65 MiB |
+| [news-publication-demo.gif](assets/news-publication-demo.gif) | 선택 시군구의 Fact·행사일정 → **모의 AI 응답** 기사 비교·빈 메모 저장·한국/일본 전환·출처 | 8단계 · 22.4초 · 약 1.70 MiB |
+| [news-ai-review-demo.gif](assets/news-ai-review-demo.gif) | 검수 예시·모의 AI 대조 결과·직접 사람 네 체크·저장 결과 | 4단계 · 12초 · 약 1.12 MiB |
 
 점심·여행 장소는 **가상 테스트 데이터**이고 `news-demo.gif`는 기존 공개 행사 자료의 **검증 대기 후보**입니다. 처음 3개 GIF의 DB에서는 기사 초안·게시·AI 사용 기록 모두 0건을 확인했습니다. 별도 `news-publication-demo.gif`는 2026-10-20에 새 Fact 피드 화면으로 다시 녹화했습니다. 먼저 기사 생성 없이 Fact 검증만으로 소식·출처가 보이는 것을 확인하고, 이어 AI 응답만 테스트 대역으로 대체해 실제 DB·화면에서 기사 검증 저장·카드 교체를 확인했습니다. 자동 검사에서는 Fact 수정 후 제외·재검증 후 복귀, 공개 중단 후 Fact 재등장 방지, HTML·뉴스 자산 캐시와 이전 서버 오류 안내도 통과했습니다. 실제 OpenAI·노션 호출과 운영 기사 게시가 아닙니다. 처음 3개 녹화에서 브라우저의 외부 정적 이미지 요청 2건도 차단했습니다. 한글·지역 선택·UTC 입력·검증 대기·게시 카드 표시를 GIF 프레임에서 확인했습니다. Windows에서 직접 다시 녹화하려면 아래 절차를 따릅니다.
 
@@ -151,4 +152,4 @@ npm run docs:news:check
 
 자세한 서버 로그·검사 수치는 커밋하지 않는 `test-results/readme-demo`에 남깁니다. 공개할 파일은 검토한 GIF와 녹화 기록뿐입니다. Linux에서는 설치된 한글 TTF의 실제 경로를 `--font`에 전달하고 브라우저에서도 한글 글꼴을 사용할 수 있게 준비합니다. Windows의 위 재현 명령은 제공한 절차이며 이번 검증은 Linux에서 수행했습니다.
 
-게시·자동 갱신 GIF는 별도 통합 테스트에서 만든다. MySQL 접속 환경은 위와 같고, PowerShell에서 `$env:NEWS_RECORD_PUBLICATION='1'`, `$env:NEWS_DEMO_FONT='C:\Windows\Fonts\malgun.ttf'`를 설정한 뒤 `.\.venv\Scripts\python.exe tests\news\browser_smoke.py`를 실행한다. 테스트는 임시 DB에서만 모의 AI 응답을 허용하고 운영 DB에서는 시작을 거절한다. 성공하면 `news-publication-demo.gif`와 해당 녹화 기록을 갱신한다. 기본 3개 녹화 도구는 다른 시연 기록을 보존하고, 간편 검증 통합 테스트는 해당 GIF만 교체한다. 마지막으로 `npm run docs:news`를 실행한다.
+게시·자동 갱신 GIF는 별도 통합 테스트에서 만든다. MySQL 접속 환경은 위와 같고, PowerShell에서 `$env:NEWS_RECORD_PUBLICATION='1'`, `$env:NEWS_DEMO_FONT='C:\Windows\Fonts\malgun.ttf'`를 설정한 뒤 `.\.venv\Scripts\python.exe tests\news\browser_smoke.py`를 실행한다. 테스트는 임시 DB에서만 모의 AI 응답을 허용하고 운영 DB에서는 시작을 거절한다. 성공하면 `news-publication-demo.gif`·`news-ai-review-demo.gif`와 해당 녹화 기록을 갱신한다. 새 검수 GIF는 예시·모의 AI 결과·사람 네 포인트·저장의 4단계 12초이며 실제 유료 호출이 아니다. 기본 3개 녹화 도구는 다른 시연 기록을 보존하고, 간편 검증 통합 테스트는 위 두 GIF만 교체한다. 마지막으로 `npm run docs:news`를 실행한다.

@@ -10,7 +10,7 @@
     root = el("news");
   if (!root) return;
   // 이전 파일을 제공하는 서버를 '19_뉴스_화면확인.bat'에서 구분하는 화면 버전입니다.
-  root.dataset.newsView = 'location-news-v1';
+  root.dataset.newsView = 'assisted-review-v1';
   const escape = (value) =>
     String(value ?? "").replace(
       /[&<>"']/g,
@@ -100,7 +100,7 @@
       method,
       credentials: "same-origin",
       cache: "no-store",
-      signal: AbortSignal.timeout(path.endsWith("/generate") || path === "/ai/check" ? 60000 : 15000),
+      signal: AbortSignal.timeout(path.endsWith("/generate") || path.endsWith("/ai-review") || path === "/ai/check" ? 60000 : 15000),
       headers: { "Content-Type": "application/json", "X-News-Request": "1" },
       ...(method !== "GET" ? { body: JSON.stringify(data || {}) } : {}),
     });
@@ -120,7 +120,7 @@
       throw error;
     }
     // Fact 검증·내용 수정·근거 해제·삭제도 메인 표시를 바꾸므로 모든 성공한 쓰기를 알립니다.
-    if (method !== "GET") notifyPublic();
+    if (method !== "GET" && !path.endsWith('/ai-review')) notifyPublic();
     return result;
   }
   // 입력/검토 팝업을 만들고 저장 중 중복 클릭·실패 안내·저장 후 목록 갱신을 공통 처리합니다.
@@ -379,30 +379,80 @@
       },
     );
   }
-  // 원문과 기사만 나란히 비교합니다. 확인 한 번과 선택 메모로 검토·승인·공개를 함께 저장합니다.
+  // AI 참고 검수 이력과 사람의 최종 확인을 구별합니다. 저장된 JSON을 HTML로 그대로 넣지 않습니다.
+  function reviewHistory(record) {
+    try {
+      const value = JSON.parse(record.reason);
+      if (value.kind === 'ai_assisted_review_v1')
+        return `ChatGPT 참고 검수 · ${value.model} · ${{running:'진행 중',completed:'결과 저장',error:'호출 실패'}[value.state] || '기록'}${value.result ? ' · ' + value.result.summary : ''}`;
+      if (value.kind === 'human_guided_review_v1')
+        return `사람 검수 4항목 확인 · ${value.note}${value.ai_review_id ? ' · AI 참고 기록 #' + value.ai_review_id : ''}${value.ai_issue_note ? '\nAI 지적 재확인: ' + value.ai_issue_note : ''}`;
+    } catch { /* 이전 자유 메모는 원문 그대로 표시합니다. */ }
+    return record.reason || '';
+  }
+  // 원문/기사 배치를 유지하고 AI 결과와 사람이 직접 체크할 네 포인트를 추가합니다.
   async function openDraft(id) {
-    const d = await api("/drafts/" + id);
+    const [d, aiConfig] = await Promise.all([
+      api('/drafts/' + id),
+      api('/ai/status').catch(() => ({key_configured:false, model_configured:false})),
+    ]);
+    if (!Array.isArray(d.review_points) || d.review_points.length !== 4)
+      throw Error('뉴스 검수 화면과 서버 버전이 다릅니다. 최신 파일을 적용하고 Node·FastAPI를 모두 다시 시작하세요.');
     const saved = d.status === "published";
     const canSave = d.evidence_current && d.status !== "rejected";
     const originals = new Map();
     d.facts.forEach(f => f.evidence.forEach(source => originals.set(source.source_url, source)));
-    const body = `<p>${saved ? "검증·저장이 완료되어 지역 소식에 표시됩니다." : "왼쪽 원문과 오른쪽 기사를 비교하세요. 확인 후 저장하면 메인의 지역 소식에 바로 표시됩니다."}</p>
+    let aiReview = d.ai_review;
+    const body = `<p>${saved ? "검증·저장이 완료되어 지역 소식에 표시됩니다." : "원문과 기사를 읽고 아래 사람 검수 포인트 4개를 확인한 뒤 저장하세요."}</p>
       ${!d.evidence_current ? '<p class="news-warning">근거가 변경되었습니다. 내용을 수정한 새 버전으로 검증하세요.</p>' : ""}
       <div class="news-review-grid"><aside><h3>원문 근거</h3>${[...originals.values()].map(source => `<section class="news-evidence"><a href="${safeURL(source.source_url)}" target="_blank" rel="noopener noreferrer">${escape(source.source_title)} · 원문 열기 ↗</a><small>${escape(source.organization)}</small><blockquote>${escape(source.source_excerpt)}</blockquote><details><summary>출처 이용 조건</summary><p>${escape(source.license_note)}</p></details></section>`).join("") || "<p>검증된 원문 근거가 없습니다.</p>"}</aside>
       <section><h3>검증할 기사</h3><h4>${escape(d.title)}</h4><div class="news-article-body">${escape(d.body_text)}</div></section></div>
-      ${!saved ? `<label class="news-check"><input type="checkbox" name="source_checked">원문과 기사 제목·본문의 사실·날짜·지역 및 출처 이용 조건을 대조했습니다.</label>${text("note", "검토 메모 (선택)", "", 'maxlength="2000"')}${submit("검증 완료·저장")}` : '<button type="button" data-stop-public>공개 중단</button>'}
-      <details><summary>내용 수정·검증 기록</summary><button type="button" data-edit>기사 내용 수정</button><p>수정본 ${d.revision_no} · ${escape(labels[d.status] || d.status)}</p>${d.reviews.map(r => `<p>${escape(r.reviewer_key)} · ${escape(String(r.created_at))}<br>${escape(r.reason)}</p>`).join("") || "<p>이전 검증 기록이 없습니다.</p>"}</details>`;
+      <section class="news-assisted-review"><h3>ChatGPT 자동 검수</h3><p>등록한 원문 구절·Fact와 현재 제목·본문을 OpenAI API에 보내 대조합니다. 실제 웹 원문 수집이나 사람의 최종 검수를 대신하지 않습니다.</p><button type="button" data-ai-review ${!canSave || !aiConfig.key_configured || !aiConfig.model_configured ? 'disabled' : ''}>ChatGPT 자동 검수 (유료)</button><small>gpt-6-luna · 같은 기사·근거의 완료 결과는 재사용합니다. 자동 검수 없이도 사람이 직접 검수할 수 있습니다.</small>${!aiConfig.key_configured ? '<p>OpenAI 키를 13번 파일로 설정하고 FastAPI를 다시 시작하면 자동 검수를 사용할 수 있습니다.</p>' : ''}<div data-ai-review-result aria-live="polite"></div></section>
+      ${!saved ? `<fieldset class="news-human-review"><legend>사람 검수 체크 포인트</legend><p>각 예시를 참고해 현재 기사를 직접 대조하세요. 예시는 기사나 DB에 저장되지 않으며 AI가 체크를 채우지 않습니다.</p>${d.review_points.map(point => `<div class="news-review-point"><label class="news-check"><input type="checkbox" name="human_${escape(point.key)}" data-human-check>${escape(point.label)}</label><small>${escape(point.question)}</small><details><summary>잘못된 표현·수정 예시</summary><p><b>잘못된 예:</b> ${escape(point.bad)}</p><p><b>수정 예:</b> ${escape(point.good)}</p></details></div>`).join('')}<p data-human-progress role="status">직접 확인 0/4</p></fieldset><div data-ai-issue hidden>${text('ai_issue_note','AI 불일치 지적을 원문과 재확인한 처리 메모 (3자 이상)','', 'maxlength="1000"')}</div>${text("note", "검토 메모 (선택)", "", 'maxlength="2000"')}${submit("검증 완료·저장")}` : '<p>사람이 검수·저장한 공개본입니다. 자동 검수는 참고 기록만 추가합니다.</p><button type="button" data-stop-public>공개 중단</button>'}
+      <details><summary>내용 수정·검증 기록</summary><button type="button" data-edit>기사 내용 수정</button><p>수정본 ${d.revision_no} · ${escape(labels[d.status] || d.status)}</p>${d.reviews.map(r => `<p>${escape(r.reviewer_key)} · ${escape(String(r.created_at))}<br>${escape(reviewHistory(r))}</p>`).join("") || "<p>이전 검증 기록이 없습니다.</p>"}</details>`;
     const current = modal("원문 비교·검증 저장", body, saved ? null : async data => {
-      if (!data.has("source_checked")) throw Error("원문 대조 확인을 체크하세요.");
+      const humanChecks = Object.fromEntries(d.review_points.map(point => [point.key, data.has('human_' + point.key)]));
+      if (Object.values(humanChecks).some(value => !value)) throw Error('사람 검수 항목 4개를 모두 직접 확인하세요.');
+      if (aiReview?.current && aiReview.state === 'completed' && aiReview.result.overall === 'fail' && String(data.get('ai_issue_note') || '').trim().length < 3)
+        throw Error('AI 불일치 지적을 원문과 재확인한 처리 메모를 3자 이상 남기세요.');
       await api(`/drafts/${id}/verify-and-save`, "POST", {
         source_checked: true, note: data.get("note") || "", expected_content_hash: d.content_hash,
+        human_checks: humanChecks, ai_issue_note: data.get('ai_issue_note') || '',
       });
     });
     if (!saved && !canSave) current.querySelector('[type="submit"]').disabled = true;
-    // 확인 누락 안내는 체크한 즉시 지워, 체크했는데도 오류가 남아 보이지 않게 합니다.
-    current.querySelector('[name="source_checked"]')?.addEventListener("change", event => {
-      if (event.currentTarget.checked) current.querySelector(".news-error").textContent = "";
-    });
+    current.querySelectorAll('[data-human-check]').forEach(box => box.addEventListener('change', () => {
+      const count = current.querySelectorAll('[data-human-check]:checked').length;
+      current.querySelector('[data-human-progress]').textContent = `직접 확인 ${count}/4`;
+      current.querySelector('.news-error').textContent = '';
+    }));
+    const stateLabel = value => ({pass:'등록 근거와 일치',warn:'주의',fail:'불일치',unknown:'사람 확인 필요'})[value] || '확인 필요';
+    function renderAI() {
+      const area = current.querySelector('[data-ai-review-result]');
+      const issue = current.querySelector('[data-ai-issue]');
+      if (issue) issue.hidden = !(aiReview?.current && aiReview.state === 'completed' && aiReview.result.overall === 'fail');
+      if (!aiReview) {area.textContent = '자동 검수 결과가 없습니다. 사람 체크는 직접 확인해 주세요.';return;}
+      if (aiReview.state !== 'completed') {area.textContent = aiReview.state === 'running' ? '자동 검수 진행 기록이 있습니다. 잠시 후 기사를 다시 열어 결과를 확인하세요.' : aiReview.message || '자동 검수 호출에 실패했습니다.';return;}
+      const result = aiReview.result;
+      area.innerHTML = `${!aiReview.current ? '<p class="news-warning">기사·원자료가 바뀐 이전 결과입니다. 현재 검수 완료로 사용할 수 없습니다.</p>' : ''}<p><b>자동 검수 참고 결과 · ${stateLabel(result.overall)}</b><br>${escape(result.summary)}</p><ul class="news-ai-checks">${result.checks.map(check => `<li><span class="news-ai-status news-ai-${check.status}">${stateLabel(check.status)}</span><b>${escape(d.review_points.find(p => p.key === check.key)?.label || check.key)}</b><p>${escape(check.note)}</p></li>`).join('')}</ul><details><summary>제목·문장별 근거 대조 ${result.claims.length}개</summary>${result.claims.map(claim => {const original = d.claims.find(c => c.id === claim.claim_id);return `<article class="news-ai-claim"><b>${original?.sequence_no === 0 ? '제목' : '본문 ' + (original?.sequence_no || '')} · ${stateLabel(claim.status)}</b><p>${escape(original?.statement_text || '')}</p><p>${escape(claim.note)}</p><small>Fact: ${escape(claim.fact_keys.join(', ') || '없음')} · 원자료 ID: ${escape(claim.source_ids.join(', ') || '없음')}</small></article>`;}).join('')}</details><p><small>${escape(aiReview.model)} · 요청자 ${escape(aiReview.requested_by)} · ${escape(String(aiReview.created_at))} · 입력/출력 토큰 ${escape(aiReview.usage?.input_tokens ?? 0)}/${escape(aiReview.usage?.output_tokens ?? 0)}. 사람 체크·승인은 자동 처리하지 않습니다.</small></p>`;
+    }
+    renderAI();
+    const aiButton = current.querySelector('[data-ai-review]');
+    aiButton.onclick = async () => {
+      aiButton.disabled = true;
+      const saveButton = current.querySelector('[type="submit"]');
+      if (saveButton) saveButton.disabled = true;
+      current.querySelector('[data-ai-review-result]').textContent = 'ChatGPT가 등록 원문과 기사를 대조하고 있습니다…';
+      try {
+        const result = await api(`/drafts/${id}/ai-review`, 'POST', {confirmation:'RUN_AI_REVIEW',expected_content_hash:d.content_hash});
+        if (!current.isConnected) return;
+        aiReview = result.review;renderAI();
+      } catch (error) {
+        if (current.isConnected) {current.querySelector('[data-ai-review-result]').textContent = error.message;}
+      } finally {
+        if (current.isConnected) {aiButton.disabled = false;if (saveButton) saveButton.disabled = !canSave;}
+      }
+    };
     current.querySelector("[data-edit]").onclick = () => editDraft(d);
     const stop = current.querySelector("[data-stop-public]");
     if (stop) stop.onclick = async () => {

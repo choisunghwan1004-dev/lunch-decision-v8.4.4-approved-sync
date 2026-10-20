@@ -14,7 +14,7 @@ function inspectLocal(root = ROOT) {
   return {release, checks: [
     {name: '메인 HTML·뉴스 JS 버전', ok: home.includes(`data-news-view="${release.view}"`) && newsJS.includes(release.view)},
     {name: '실제 시군구 연결', ok: mainJS.includes('main-region-changed') && newsJS.includes('district_id=${selectedDistrict}')},
-    {name: '관리자 JS 버전·상태 변경 버튼 제거', ok: adminJS.includes(release.view) && !/상태\s*변경|data-news-action=["']fact-status/.test(adminJS + admin)},
+    {name: '관리자 JS 버전·상태 변경 버튼 제거', ok: adminJS.includes(release.admin_view || release.view) && !/상태\s*변경|data-news-action=["']fact-status/.test(adminJS + admin)},
   ]};
 }
 
@@ -23,10 +23,10 @@ async function inspectRunning(base, release, fetchImpl = fetch) {
   const requests = [
     ['제공 중인 메인 HTML', '/', text => text.includes(`data-news-view="${release.view}"`)],
     ['제공 중인 사용자 JS', '/news-public.js', text => text.includes(release.view)],
-    ['제공 중인 관리자 HTML', '/admin', text => text.includes('news-admin.js?v=852location1')],
-    ['제공 중인 관리자 JS·상태 변경 제거', '/news-admin.js', text => text.includes(release.view) && !/상태\s*변경|data-news-action=["']fact-status/.test(text)],
+    ['제공 중인 관리자 HTML', '/admin', text => text.includes('news-admin.js?v=' + (release.admin_asset || '852location1'))],
+    ['제공 중인 관리자 JS·상태 변경 제거', '/news-admin.js', text => text.includes(release.admin_view || release.view) && !/상태\s*변경|data-news-action=["']fact-status/.test(text)],
     ['Node 프록시·FastAPI 실행 버전', '/api/news/public/version', text => {
-      const value = JSON.parse(text); return value.revision === release.revision && value.view === release.view;
+      const value = JSON.parse(text); return value.revision === release.revision && value.view === release.view && value.admin_view === release.admin_view;
     }],
   ];
   // 서로 독립적인 읽기이므로 함께 요청합니다. 키·응답 본문·오류의 내부 설정은 출력하지 않습니다.
