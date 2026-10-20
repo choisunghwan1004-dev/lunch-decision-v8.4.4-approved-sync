@@ -1,0 +1,4 @@
+# README 실행 화면을 재현할 때만 설치합니다. 운영 서버에는 필요 없습니다.
+-r requirements-dev.txt
+playwright==1.51.0
+Pillow==13.0.0

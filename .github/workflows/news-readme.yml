@@ -1,0 +1,59 @@
+name: Regional news README sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/news-readme.yml'
+      - 'lunch-decision-v8.4.4-approved-sync/news_service/**'
+      - 'lunch-decision-v8.4.4-approved-sync/public/news-*.js'
+      - 'lunch-decision-v8.4.4-approved-sync/routes/news-proxy.js'
+      - 'lunch-decision-v8.4.4-approved-sync/sql/04_news_v852.sql'
+      - 'lunch-decision-v8.4.4-approved-sync/sql/05_news_automation.sql'
+      - 'lunch-decision-v8.4.4-approved-sync/data/news/**'
+      - 'lunch-decision-v8.4.4-approved-sync/docs/news-readme.json'
+      - 'lunch-decision-v8.4.4-approved-sync/docs/assets/**'
+      - 'lunch-decision-v8.4.4-approved-sync/scripts/update-news-readme.js'
+      - 'lunch-decision-v8.4.4-approved-sync/tests/news-readme.test.js'
+      - 'lunch-decision-v8.4.4-approved-sync/package.json'
+  workflow_dispatch:
+
+# main의 승인된 코드만 실행합니다. README 외의 파일이나 비밀 설정은 커밋하지 않습니다.
+permissions:
+  contents: write
+concurrency:
+  group: regional-news-readme-main
+  cancel-in-progress: false
+
+jobs:
+  update-readme:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: lunch-decision-v8.4.4-approved-sync
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Generate and verify regional news README
+        run: |
+          npm run docs:news
+          npm run test:docs
+          npm run docs:news:check
+      - name: Commit README only when changed
+        run: |
+          git add -- README.md
+          if git diff --cached --quiet; then
+            echo "Regional news README is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: sync regional news README from source"
+          git push origin HEAD:main

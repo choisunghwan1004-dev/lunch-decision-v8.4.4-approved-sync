@@ -212,8 +212,19 @@
     // 빠르게 주제를 바꿔도 나중에 도착한 이전 주제 응답이 현재 화면에 섞이지 않습니다.
     if (selected !== active || version !== workspaceVersion || !ready) return;
     [sources, facts, drafts] = lists;
+    // Fact 저장·검증과 기사 승인·게시는 서로 다른 저장 단계입니다. 현재 DB 상태와 다음 동작을 명시합니다.
+    const verified = facts.filter(f => f.status === "verified").length;
+    const approved = drafts.filter(d => d.status === "approved").length;
+    const published = drafts.filter(d => d.status === "published").length;
+    const nextStep = topic.is_demo ? "시연용 주제는 운영 화면에 게시할 수 없습니다."
+      : published ? "게시가 저장되었습니다. 사용자 화면에서 같은 지역 또는 전체 지역을 선택해 확인하세요."
+      : approved ? "최종 승인이 저장되었습니다. 기사 검토·수정을 열고 승인본 게시를 눌러야 메인에 표시됩니다."
+      : drafts.length ? "초안이 저장되었습니다. 문장별 근거 대조 → 최종 승인 → 승인본 게시를 진행하세요."
+      : verified ? "Fact 검증이 저장되었습니다. 검증 Fact로 초안 생성 → 기사 검토 → 승인 → 게시를 진행하세요."
+      : "출처와 Fact를 저장한 뒤 원문 대조로 Fact를 검증하세요.";
     el("newsWorkspace").innerHTML =
       `<p><b>${escape(topic.title)}</b> · ${escape(topic.region_name)} · 예약 주제 번호 <b>#${topic.id}</b> ${topic.is_demo ? '<span class="news-pill">시연용 · 운영 게시 금지</span>' : ""}</p>
+ <section class="news-block" aria-label="메인 노출 상태"><h3>메인 노출 상태</h3><p>출처 ${sources.length}건 · Fact ${facts.length}건 / 검증 ${verified}건 · 기사 ${drafts.length}건 / 승인 ${approved}건 / 게시 ${published}건</p><p>${escape(nextStep)}</p><a href="/?news_scope=all#regionalNews" target="_blank" rel="noopener noreferrer">사용자 화면의 전체 지역 소식 확인 ↗</a></section>
  <section class="news-block"><div class="news-toolbar"><h3>1. 출처와 원자료</h3><button type="button" data-news-action="import">CSV·JSON 가져오기</button><button type="button" data-news-action="source">출처 등록</button></div>${sources.length ? sources.map((s) => `<article class="news-row"><div><b>${escape(s.source_title)}</b><p>${escape(s.organization)} · <a href="${safeURL(s.source_url)}" target="_blank" rel="noopener noreferrer">원문 열기 ↗</a></p><small>공개 시점 ${escape(String(s.published_at || "미입력").replace("T", " "))}</small></div><div class="news-row-actions"><button type="button" data-news-action="source" data-id="${s.id}">수정</button><button type="button" data-news-action="delete-source" data-id="${s.id}">삭제</button></div></article>`).join("") : "<p>등록된 출처가 없습니다.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><h3>2. Fact Sheet · 사람의 원문 검증</h3><button type="button" data-news-action="fact">Fact 등록</button></div>${facts.length ? facts.map((f) => `<article class="news-row"><div><b>${escape(f.fact_key)}</b> ${pill(f.status)}<p>${escape(f.value_text)}</p><small>출처 ${f.evidence.length}개 · ${escape(f.verification_note || "검증 의견 없음")}</small></div><div class="news-row-actions"><button type="button" data-news-action="fact" data-id="${f.id}">수정</button><button type="button" data-news-action="evidence" data-id="${f.id}">근거 연결</button><button type="button" data-news-action="verify" data-id="${f.id}">원문 대조</button><button type="button" data-news-action="fact-status" data-id="${f.id}">상태 변경</button><button type="button" data-news-action="delete-fact" data-id="${f.id}">삭제</button></div></article>`).join("") : "<p>확인할 사실을 항목별로 등록하세요.</p>"}</section>
  <section class="news-block"><div class="news-toolbar"><div><h3>3. 초안 · 최종 검토 · 게시</h3><small>gpt-6-luna · 생성 시 OpenAI API 비용 발생 · 사실 검증은 별도</small></div><button type="button" data-news-action="generate" ${facts.some((f) => f.status === "verified") ? "" : "disabled"}>검증 Fact로 초안 생성</button></div>${drafts.map((d) => `<article class="news-row"><div><b>${escape(d.title)}</b><p>수정본 ${d.revision_no} · ${pill(d.status)}</p><small>${escape(d.created_by)} · ${escape(String(d.created_at).replace("T", " "))}</small></div><button type="button" data-news-action="draft" data-id="${d.id}">기사 검토·수정</button></article>`).join("") || "<p>저장된 초안이 없습니다.</p>"}</section>`;
@@ -380,7 +391,7 @@
       );
     modal(
       `수정본 ${d.revision_no} · ${labels[d.status] || d.status}`,
-      `${!d.evidence_current ? '<p class="news-warning">현재 Fact Sheet와 다른 초안입니다. 새 수정본을 저장한 뒤 재검토하세요.</p>' : ""}<div class="news-review-grid"><div><h3>${escape(d.title)}</h3>${d.claims.map((c) => `<div class="news-sentence" data-claim="${c.id}"><b>${c.sequence_no === 0 ? "제목" : "문장 " + c.sequence_no}</b> ${pill(c.status)}<p>${escape(c.statement_text)}</p><small>근거 ${escape(c.fact_keys.join(", "))}</small>${editable && d.evidence_current ? `<label class="news-check"><input type="checkbox" data-source-checked>연결된 원자료를 직접 대조했습니다.</label><textarea data-claim-note aria-label="문장 검토 의견" placeholder="검토 의견 (3자 이상)">${escape(c.check_note || "")}</textarea><div class="news-review-actions"><button type="button" data-check="supported" data-id="${c.id}">근거 일치</button><button type="button" data-check="contradicted" data-id="${c.id}">불일치</button></div>` : ""}</div>`).join("")}</div><aside><h3>현재 검증된 Fact와 원자료</h3>${d.facts.map(evidenceHTML).join("") || "<p>현재 검증된 Fact가 없습니다.</p>"}<details><summary>이 수정본 저장 당시의 근거</summary>${d.saved_fact_sheet ? d.saved_fact_sheet.facts.map(evidenceHTML).join("") : "<p>구형 초안에는 근거 원문 스냅샷이 없습니다. 새 수정본을 저장하세요.</p>"}</details></aside></div><div class="news-review-actions"><button type="button" data-edit>새 수정본 작성</button></div><h3>최종 검토</h3><p>승인 후 게시 버튼을 눌러 사용자 화면에 공개합니다.</p>${[
+      `${d.status === "approved" ? '<p class="news-warning">최종 승인은 저장되었습니다. 아래 승인본 게시를 눌러야 사용자 메인에 공개됩니다.</p>' : ""}${!d.evidence_current ? '<p class="news-warning">현재 Fact Sheet와 다른 초안입니다. 새 수정본을 저장한 뒤 재검토하세요.</p>' : ""}<div class="news-review-grid"><div><h3>${escape(d.title)}</h3>${d.claims.map((c) => `<div class="news-sentence" data-claim="${c.id}"><b>${c.sequence_no === 0 ? "제목" : "문장 " + c.sequence_no}</b> ${pill(c.status)}<p>${escape(c.statement_text)}</p><small>근거 ${escape(c.fact_keys.join(", "))}</small>${editable && d.evidence_current ? `<label class="news-check"><input type="checkbox" data-source-checked>연결된 원자료를 직접 대조했습니다.</label><textarea data-claim-note aria-label="문장 검토 의견" placeholder="검토 의견 (3자 이상)">${escape(c.check_note || "")}</textarea><div class="news-review-actions"><button type="button" data-check="supported" data-id="${c.id}">근거 일치</button><button type="button" data-check="contradicted" data-id="${c.id}">불일치</button></div>` : ""}</div>`).join("")}</div><aside><h3>현재 검증된 Fact와 원자료</h3>${d.facts.map(evidenceHTML).join("") || "<p>현재 검증된 Fact가 없습니다.</p>"}<details><summary>이 수정본 저장 당시의 근거</summary>${d.saved_fact_sheet ? d.saved_fact_sheet.facts.map(evidenceHTML).join("") : "<p>구형 초안에는 근거 원문 스냅샷이 없습니다. 새 수정본을 저장하세요.</p>"}</details></aside></div><div class="news-review-actions"><button type="button" data-edit>새 수정본 작성</button></div><h3>최종 검토</h3><p>승인 후 게시 버튼을 눌러 사용자 화면에 공개합니다.</p>${[
         ["numbers", "수치·금액·단위"],
         ["time_and_region", "시점·날짜·지역"],
         ["no_unfounded_causes", "인과·과장·근거 없는 해석"],
@@ -450,25 +461,33 @@
                 ].map((k) => [k, form.has(k)]),
               );
             await api(`/drafts/${id}/review`, "POST", body);
-          }, true)),
+          }, button.dataset.review !== "approved")),
     );
     current.querySelector("[data-publish]").onclick = () =>
       action(
-        () =>
-          api(`/drafts/${id}/publish`, "POST", {
+        async () => {
+          await api(`/drafts/${id}/publish`, "POST", {
             confirmation: "PUBLISH",
             expected_content_hash: d.content_hash,
-          }),
+          });
+          notifyPublic();
+        },
         true,
       );
     current.querySelector("[data-unpublish]").onclick = () =>
       action(
-        () =>
-          api(`/drafts/${id}/unpublish`, "POST", {
+        async () => {
+          await api(`/drafts/${id}/unpublish`, "POST", {
             reason: current.querySelector("[name=review_reason]").value,
-          }),
+          });
+          notifyPublic();
+        },
         true,
       );
+  }
+  function notifyPublic() {
+    try { localStorage.setItem("regional-news-changed", String(Date.now()) + Math.random()); }
+    catch { /* 저장소 사용이 막혀도 게시 저장은 성공했습니다. 메인의 새로고침으로 재조회할 수 있습니다. */ }
   }
   // 기존 초안을 덮어쓰지 않고 새 수정본을 저장합니다. Fact Key 목록을 쉼표로 나눠 전송합니다.
   function editDraft(d) {

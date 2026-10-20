@@ -10,6 +10,7 @@
 
 **처음 실행하려면 [Windows 상세 실행 순서](README_AUTOMATION.md)를 보세요.** 13번 키 설정 → 14번 실제 OpenAI 호출 시험 → 09번 웹 서버 → 15번 노션 DB 연결 → 16번 매일 한국 시간 16:00 예약 등록 → 17번 즉시 전체 실행 순서입니다. 새 예약은 검증 Fact로 미검토 초안을 만들고 노션 원자료·AI초안 DB에 저장합니다. 15번의 SQL 05 설치가 `news_automation_runs` 테이블 1개를 선택 추가하며, 검토·승인·게시는 사람이 진행합니다. [OpenAI 연결과 오류 안내](README_OPENAI.md).
 
+- [지역 뉴스 — 현재 기능과 운영 흐름](#regional-news)
 - [실행 화면 GIF](#demo)
 - [1. 기능정의서](#1-기능정의서)
 - [2. 화면구성도 및 화면 설계](#2-화면구성도-및-화면-설계)
@@ -23,52 +24,138 @@
 
 버전별 상세 안내: [V8.4.2 여행·샘플](README_V8.4.2.md) · [V8.4.3 화면·길찾기](README_V8.4.3.md) · [V8.4.4 승인형 동기화](README_V8.4.4.md)
 
+<!-- REGIONAL_NEWS_START -->
+<a id="regional-news"></a>
+
+## 지역 뉴스 — 현재 기능과 운영 흐름
+
+이 구역은 코드·SQL·자료 파일에서 자동 갱신합니다. [갱신 방법과 범위](docs/NEWS_README_AUTOMATION.md).
+
+| 항목 | 현재 구현 |
+| --- | --- |
+| 뉴스 버전 · 모델 | V8.5.2 · `gpt-6-luna` (설정·사용 권한 필요) |
+| 화면 | 관리자 `/admin` → **지역 뉴스** · 사용자 `/` → **점심과 여행, 지역 소식** |
+| 실행 구조 | Node.js 화면·세션 → 내부 토큰 프록시 → Python FastAPI → MySQL |
+| 예약 | Asia/Seoul 매일 **16:00** · 별도 예약 등록 필요 |
+| DB | 기본 뉴스·버전 테이블 11개 + 선택 예약 테이블 1개 |
+| 내부 API | 30개 경로·메서드 조합 · 관리자 요청은 `/api/news` 프록시 사용 |
+
+| 순서 | 처리 | 다음 단계 조건 |
+| --- | --- | --- |
+| 1 | 등록된 시군구에서 뉴스 주제 선정 | 주제에 지역·분류·운영/시연 여부 지정 |
+| 2 | 출처·구절·이용 조건 등록 또는 CSV/JSON 가져오기 | 사람이 원문을 열어 근거를 수집; 가져오기는 검증 대기 |
+| 3 | Fact와 출처 연결 → 원문 대조 → Fact 검증 | 검증된 Fact만 Fact Sheet와 AI 생성에 사용 |
+| 4 | LLM 초안 생성·문장별 Fact 근거 저장 | 생성 후에도 문장별 사실 검증은 별도로 진행 |
+| 5 | 사람이 기사 수정·문장별 근거 대조·최종 검토 | 수치·시간/지역·추론·출처/권리 확인 후 승인 |
+| 6 | 사람이 게시 또는 게시 중단 | 게시된 기사만 사용자 지역 소식에 노출 |
+
+- **URL 자동 수집은 구현되어 있지 않습니다.** URL 등록은 링크·근거 저장이며 기사 본문 다운로드가 아닙니다.
+- **16시 예약**은 이미 검증된 Fact로 초안을 만들고 MySQL·노션에 검토 대기로 저장합니다. 자동 기사 수집·검증·승인·게시는 하지 않습니다.
+- 출처·Fact·근거를 바꾸면 관련 승인이 해제되고 게시가 중단될 수 있으므로 다시 대조·승인합니다.
+- 한국·일본의 등록 지역을 공통으로 사용합니다. 뉴스 시군구·주제가 비어 있으면 연결 상태와 지역/주제 등록 여부를 먼저 확인합니다.
+- **메인 노출 확인:** 관리자에서 출처·검증 Fact·기사·승인·게시 저장 수와 다음 단계를 표시합니다. 최종 승인 후 별도 **승인본 게시**가 필요하며, 열린 메인은 같은 브라우저의 게시 알림·화면 복귀·새로고침으로 재조회합니다. 지역이 다르면 **전체 지역**에서 게시 기사를 확인합니다. [미노출 점검 순서](docs/NEWS_PUBLICATION.md).
+
+**출처 등록:** 자료 종류 → 발행 기관 → 자료 제목 → HTTPS 원문 URL → 공개 시점(UTC) → 관련 구절 → 이용 조건을 입력합니다. [종로 실제 입력 예시·UTC 변환·원문 확인 기록](docs/NEWS_SOURCES.md). 미리 정리한 파일은 **CSV·JSON 가져오기**로 입력하며 두 형식 중 하나만 사용합니다.
+
+### 가져올 수 있는 지역 뉴스 자료
+
+| 자료 파일 | Fact 후보 | 서로 다른 출처 |
+| --- | --- | --- |
+| [jongno_events_20261020.json](data/news/jongno_20261020/jongno_events_20261020.json) · [CSV](data/news/jongno_20261020/jongno_events_20261020.csv) | 8 | 3 |
+
+자료를 가져오면 검증 대기 상태로 저장됩니다. 원문 일정·장소·이용 조건을 확인한 뒤 사용할 Fact를 검증합니다.
+
+<details>
+<summary>코드에서 읽은 뉴스 테이블·내부 API</summary>
+
+기본 설치: `news_topics`, `news_sources`, `news_facts`, `news_fact_evidence`, `news_drafts`, `news_claims`, `news_claim_facts`, `news_reviews`, `news_publications`, `news_ai_usage`, `news_schema_version`.
+
+선택 예약 설치: `news_automation_runs`.
+
+`news_service/app.py`에 선언된 경로입니다. FastAPI 주소를 사용자 화면 주소로 사용하지 않습니다.
+
+```text
+GET /ai/status
+POST /ai/check
+GET /health
+GET /regions
+GET /topics
+POST /topics
+POST /topics/{topic_id}/import
+GET /topics/{topic_id}/sources
+POST /topics/{topic_id}/sources
+PUT /topics/{topic_id}/sources/{source_id}
+DELETE /topics/{topic_id}/sources/{source_id}
+GET /topics/{topic_id}/facts
+POST /topics/{topic_id}/facts
+PUT /topics/{topic_id}/facts/{fact_id}
+DELETE /topics/{topic_id}/facts/{fact_id}
+POST /topics/{topic_id}/facts/{fact_id}/evidence
+DELETE /topics/{topic_id}/facts/{fact_id}/evidence/{source_id}
+POST /topics/{topic_id}/facts/{fact_id}/verify
+POST /topics/{topic_id}/facts/{fact_id}/status
+GET /topics/{topic_id}/fact-sheet
+POST /topics/{topic_id}/generate
+GET /topics/{topic_id}/drafts
+GET /drafts/{draft_id}
+POST /drafts/{draft_id}/revisions
+POST /drafts/{draft_id}/claims/{claim_id}/review
+POST /drafts/{draft_id}/review
+POST /drafts/{draft_id}/publish
+POST /drafts/{draft_id}/unpublish
+GET /public
+GET /public/{publication_id}
+```
+
+</details>
+
+상세 안내: [기능·화면·DB·SQL·테스트](README_NEWS_V8.5.2.md) · [실행·16시 예약·노션](README_AUTOMATION.md) · [연결 복구](README_NEWS_RECOVERY.md) · [실제 OpenAI 연결](README_OPENAI.md).
+<!-- REGIONAL_NEWS_END -->
+
 <!-- DEMO_GIFS_START -->
 <a id="demo"></a>
 
 ## 실행 화면 GIF
 
-**현재 상태: 본인 실행 화면 GIF 녹화·업로드 대기.** 아래는 녹화할 순서이며 실행 증거가 아닙니다. [Windows 녹화·GIF 저장·README 삽입 방법](docs/SCREEN_RECORDING.md)을 따라 실제 파일을 준비합니다.
+2026-10-20 Linux Chromium 134.0.6998.35 · Node.js/실제 FastAPI · MySQL 8.0.36-2ubuntu3의 **격리된 임시 테스트 DB**에서 녹화했습니다. 운영 PC의 실행 결과와 구분합니다. OpenAI·노션은 호출하지 않았습니다.
 
 <details>
-<summary>점심 추천 — 지역 선택부터 추천 결과까지</summary>
+<summary>점심 추천 — 한국·일본 지역 선택과 결과</summary>
 
-- 녹화 순서: 사용자 메인 → 국가·지역·상권 선택 → 점심 추천 또는 다시 결정 → 결과 확인.
-- 등록할 파일: `docs/assets/lunch-demo.gif`.
+한국 종로구와 일본 신주쿠구를 실제 선택하고 추천 결과를 확인했습니다. 장소는 **가상 테스트 데이터**입니다.
 
-<!-- 실제 GIF를 업로드한 뒤 아래 img 태그의 주석을 해제합니다.
-<img src="docs/assets/lunch-demo.gif" alt="지역과 상권을 선택하고 점심 추천 결과를 확인하는 실제 실행 화면" width="900">
--->
+<img src="docs/assets/lunch-demo.gif" alt="한국과 일본 지역을 차례로 선택해 점심 추천을 확인한 실제 테스트 화면" width="1000">
 
 </details>
 
 <details>
-<summary>여행 일정 — 지역·일수 선택부터 일정 확인까지</summary>
+<summary>여행 일정 — 2일 일정과 날짜별 여섯 단계</summary>
 
-- 녹화 순서: 여행 일정 → 등록된 여행 지역·일수 선택 → 일정 생성 → 날짜별 장소 확인.
-- 등록할 파일: `docs/assets/travel-demo.gif`.
+종로구 2일 일정의 **12개 단계**를 확인했습니다. 가상 장소의 이동시간·영업정보는 확인하지 않은 상태로 표시됩니다.
 
-<!-- 실제 GIF를 업로드한 뒤 아래 img 태그의 주석을 해제합니다.
-<img src="docs/assets/travel-demo.gif" alt="여행 지역과 일수를 선택하고 날짜별 일정을 확인하는 실제 실행 화면" width="900">
--->
+<img src="docs/assets/travel-demo.gif" alt="종로구 2일 여행 일정을 생성하고 날짜별 여섯 단계를 확인한 실제 테스트 화면" width="1000">
 
 </details>
 
 <details>
-<summary>지역 뉴스 — 목록 조회와 기사·출처 확인</summary>
+<summary>지역 뉴스 — 종로 CSV 가져오기와 출처 입력 항목</summary>
 
-- 녹화 순서: 사용자 메인의 지역 소식 → 등록된 지역 선택 → 이미 게시된 기사 열기 → 출처 확인.
-- 등록할 파일: `docs/assets/news-demo.gif`. 게시된 기사가 있을 때 녹화합니다.
-- 기사 생성·승인·게시를 녹화하려면 별도 운영 절차를 따릅니다. 녹화용 화면을 만들기 위해 실제 기사를 임의로 게시하지 않습니다.
+실제 공개 행사 CSV로 **출처 3건·Fact 후보 8건·근거 연결 8건**을 저장했습니다. 출처 편집 화면의 입력 항목도 확인했습니다. **AI 생성·Fact 검증 완료·승인·게시는 시연하지 않았습니다.**
 
-<!-- 실제 GIF를 업로드한 뒤 아래 img 태그의 주석을 해제합니다.
-<img src="docs/assets/news-demo.gif" alt="선택한 지역의 게시된 기사와 원자료 출처를 확인하는 실제 실행 화면" width="900">
--->
+<img src="docs/assets/news-demo.gif" alt="종로 지역 뉴스 주제를 만들고 CSV를 가져와 출처와 검증 대기 Fact를 확인한 실제 화면" width="1000">
 
 </details>
 
-GIF가 저장소에 올라온 뒤 해당 이미지 주석을 해제하고 상태를 갱신합니다. 파일이 없는 동안에는 깨진 이미지를 표시하지 않습니다.
+<details>
+<summary>지역 뉴스 게시 — 승인·게시와 열린 메인의 자동 갱신</summary>
 
+**모의 AI 응답**을 사용하는 격리 MySQL 테스트에서 승인 대기·명시적 게시·열린 메인의 자동 반영·전체 지역 조회·원자료 표시를 확인했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**
+
+<img src="docs/assets/news-publication-demo.gif" alt="모의 AI 응답의 격리 테스트에서 승인과 게시 후 열린 메인의 기사와 출처를 확인한 실제 화면" width="1000">
+
+</details>
+
+[녹화 범위·다시 녹화하는 방법](docs/SCREEN_RECORDING.md). 이미지를 교체하면 녹화 기록도 함께 갱신합니다.
 <!-- DEMO_GIFS_END -->
 
 ## 1. 기능정의서
@@ -616,6 +703,8 @@ Remove-Item Env:NEWS_TEST_MYSQL
 | T15 | 없는 ID·다른 주제 ID·오래된 내용 해시로 수정 | 404/409 등으로 거절, 다른 주제 데이터 손상 없음 |
 | T16 | 모바일 너비에서 팝업·출처·카드·닫기 확인 | 텍스트 겹침·뉴스 영역 가로 넘침 없이 읽고 닫을 수 있음 |
 | T17 | 새 종로구 주제에 실제 행사 CSV 또는 JSON 가져오기 | 출처 3건·Fact 8건이 검증 대기로 저장되고 재가져오기는 409로 거절됨 |
+| T18 | `npm run docs:news` → `npm run test:docs` → `npm run docs:news:check` | 새 뉴스 자료·코드 정보 반영, 수동 영역 보존, 재실행 시 차이 없음, 없는 GIF 거절 |
+| T19 | 메인을 먼저 열고 다른 관리자 탭에서 승인·게시·중단 | 승인만으로 미노출, 게시 후 열린 메인 자동 반영, 중단 후 목록 제거, 지역·전체 조회 구별 |
 
 실제 OpenAI 테스트는 서버 `.env`의 키와 `gpt-6-luna` 사용 권한을 준비한 후 관리자에서 검증 Fact로 초안을 한 번 생성해 확인합니다. 비용이 발생할 수 있습니다. 실패 응답·미완료 응답을 승인 기사로 저장해서는 안 됩니다. Google 동기화의 알려진 진입부 문제는 4.4절을 확인하며, 무료 로직 테스트만으로 Google 유료 API 성공을 판단하지 않습니다.
 
@@ -634,6 +723,8 @@ Remove-Item Env:NEWS_TEST_MYSQL
 문서만 바뀌면 링크와 변경 내용 등 해당 범위의 검사를 수행합니다. 커밋에는 작업 파일만 포함하며 비밀정보와 기존 사용자 작업을 보호합니다. GitHub 권한 등으로 반영이 막히면 완료된 로컬 결과와 차단 사유를 안내합니다.
 
 이 절차는 코딩 작업에 적용됩니다. 사용자 PC에서 임의로 수정한 파일을 감시해 자동 커밋하는 프로그램은 설치하지 않습니다.
+
+**지역 뉴스 요약은 자동 갱신됩니다.** `npm run docs:news`가 코드·SQL·자료·실제 GIF 기록에서 위 자동 구역을 만들며 `npm run check`에도 연결되어 있습니다. `main`의 관련 파일이 바뀌면 GitHub Actions의 **Regional news README sync**가 검사 후 차이가 있는 README만 자동 커밋합니다. 기능 의미와 새 실행 화면은 사람이 확인·기록합니다. [갱신 범위·실행·권한 오류 안내](docs/NEWS_README_AUTOMATION.md).
 
 <details>
 <summary>통합 전 기록: 기존 설치·이관·뉴스 확장 작업 안내</summary>

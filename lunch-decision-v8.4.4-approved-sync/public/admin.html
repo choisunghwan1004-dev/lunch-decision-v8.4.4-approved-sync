@@ -213,6 +213,6 @@ async function logout(){await api('/api/auth/logout',{method:'POST'});location.r
 async function init(){try{const me=await api('/api/auth/me');if(!me.loggedIn)return;$('login').style.display='none';$('app').style.display='block';await loadAll();if(!document.querySelector('.panel.active'))show('location');}catch(e){$('loginMsg').textContent=e.message;}}
 bindCascade('loc');bindCascade('r');bindCascade('p');bindCascade('sync');
 ['syncCountry','syncProvince','syncDistrict','syncTown','syncRi','syncArea','syncType'].forEach(id=>$(id).addEventListener('change',clearSync));init();
-</script><script src="/news-admin.js?v=852r2"></script>
+</script><script src="/news-admin.js?v=852r3"></script>
 </body></html>
 

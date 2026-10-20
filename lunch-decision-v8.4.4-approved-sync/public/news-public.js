@@ -39,7 +39,7 @@
       return "#";
     }
   };
-  let mode = "lunch",
+  let mode = new URLSearchParams(window.location.search).get("news_scope") === "all" ? "all" : "lunch",
     timer,
     request = 0,
     items = [],
@@ -50,7 +50,11 @@
         Number(el(mode === "travel" ? "travelCity" : "cityId")?.value) || 0,
       current = ++request;
     el("regionalNewsCards").replaceChildren();
-    if (!region) {
+    // 전체 지역에서는 시군구 필터를 보내지 않습니다. 승인·게시 검사 자체는 서버가 그대로 수행합니다.
+    const allRegions = mode === "all";
+    const selected = Array.from(el("travelCity")?.options || []).find(option => Number(option.value) === region);
+    const scope = allRegions ? "전체 지역" : `${mode === "travel" ? "여행" : "점심"} 지역 · ${selected?.textContent || "선택한 지역"}`;
+    if (!allRegions && !region) {
       el("regionalNewsStatus").textContent =
         "지역을 선택하면 해당 지역의 소식을 보여드립니다.";
       return;
@@ -58,16 +62,17 @@
     el("regionalNewsStatus").textContent = "지역 소식을 불러오고 있습니다.";
     try {
       const response = await fetch(
-        `/api/news/public?district_id=${region}&limit=6`,
+        `/api/news/public?${allRegions ? "" : `district_id=${region}&`}limit=6`,
         { cache: "no-store" },
       );
       if (!response.ok) throw Error();
       const result = await response.json();
+      if (!Array.isArray(result)) throw Error();
       if (current !== request) return;
       items = result;
       el("regionalNewsStatus").textContent = items.length
-        ? `${items[0].region_name} · 편집자가 검토한 소식 ${items.length}건`
-        : "아직 이 지역에 게시된 소식이 없습니다.";
+        ? `${scope} · 편집자가 검토한 소식 ${items.length}건`
+        : `${scope} · 현재 게시된 소식이 없습니다.${allRegions ? "" : " 다른 지역의 소식은 전체 지역에서 확인하세요."}`;
       el("regionalNewsCards").innerHTML = items
         .map(
           (article) =>
@@ -82,6 +87,7 @@
   }
   // 연속된 지역 선택 이벤트를 짧게 모아 마지막 선택으로 한 번 조회합니다.
   function schedule() {
+    ++request; // 선택이 바뀐 순간 진행 중인 이전 응답을 무효화합니다.
     clearTimeout(timer);
     timer = setTimeout(refresh, 150);
   }
@@ -94,6 +100,17 @@
       schedule();
     }),
   );
+  document.querySelectorAll("[data-news-mode]").forEach(button => button.setAttribute("aria-pressed", String(button.dataset.newsMode === mode)));
+  el("regionalNewsRefresh")?.addEventListener("click", schedule);
+  // 관리자와 메인을 서로 다른 탭에서 열어도 게시·중단 결과를 다시 조회합니다.
+  // localStorage에는 시각만 기록하며 초안·내부 토큰·기사 원문은 공유하지 않습니다.
+  window.addEventListener("storage", event => {
+    if (event.key === "regional-news-changed") schedule();
+  });
+  window.addEventListener("focus", schedule);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") schedule();
+  });
   [
     "countryId",
     "provinceId",

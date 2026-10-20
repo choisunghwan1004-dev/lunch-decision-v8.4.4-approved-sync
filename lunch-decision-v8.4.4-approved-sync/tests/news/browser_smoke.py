@@ -11,6 +11,7 @@ import sys
 import time
 import urllib.request
 import uuid
+import json
 
 import mysql.connector
 from playwright.sync_api import sync_playwright, expect
@@ -43,6 +44,21 @@ def main():
     cur = admin.cursor()
     processes, handles = [], []
     ARTIFACTS.mkdir(exist_ok=True)
+    publication_frames = []
+    # 선택한 경우에만 공개할 GIF를 만듭니다. 테스트 AI 응답이라는 표시는 모든 프레임에 남깁니다.
+    def capture_publication(page, label):
+        if os.getenv('NEWS_RECORD_PUBLICATION') != '1':
+            return
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+        font = os.environ['NEWS_DEMO_FONT']
+        shot = Image.open(BytesIO(page.screenshot(type='jpeg', quality=88))).convert('RGB')
+        canvas = Image.new('RGB', (shot.width, shot.height + 70), '#102335')
+        canvas.paste(shot, (0, 70))
+        draw = ImageDraw.Draw(canvas)
+        draw.text((20, 8), label, font=ImageFont.truetype(font, 24), fill='white')
+        draw.text((20, 40), '격리 MySQL 테스트 · 모의 AI 응답 · 실제 OpenAI 호출·운영 게시 없음', font=ImageFont.truetype(font, 17), fill='#b7d9eb')
+        publication_frames.append(canvas.quantize(colors=160))
     try:
         cur.execute(f'CREATE DATABASE `{name}` CHARACTER SET utf8mb4')
         cur.execute(f'USE `{name}`')
@@ -75,7 +91,8 @@ def main():
         wait_url(f'http://127.0.0.1:{api_port}/health', {'x-news-internal-token': env['NEWS_INTERNAL_TOKEN']})
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True, args=['--no-sandbox'])
-            page = browser.new_page(viewport={'width': 1440, 'height': 1000})
+            context = browser.new_context(viewport={'width': 1440, 'height': 1000})
+            page = context.new_page()
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
             page.goto(base + '/admin')
@@ -196,6 +213,16 @@ def main():
                 row.locator('[data-claim-note]').fill('브라우저에서 원자료 직접 대조 완료')
                 row.get_by_role('button', name='근거 일치', exact=True).click()
                 expect(page.locator('dialog:visible [data-claim]').nth(index)).to_contain_text('근거 대조 완료')
+            # 메인을 미리 열어 빈 목록을 읽게 합니다. 게시 후 다시 탐색하지 않고 자동 갱신돼야 합니다.
+            public_page = page.context.new_page()
+            public_page.goto(base + '/')
+            public_page.locator('#countryId').select_option(label='일본')
+            public_page.locator('#provinceId').select_option(label='도쿄도')
+            public_page.locator('#districtId').select_option(label='신주쿠구')
+            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('현재 게시된 소식이 없습니다')
+            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('신주쿠구')
+            public_page.locator('#regionalNews').scroll_into_view_if_needed()
+            capture_publication(public_page, '뉴스 게시 1/5 · 게시 전에는 사용자 목록이 비어 있습니다')
             dialog = page.locator('dialog:visible')
             for field in ('numbers', 'time_and_region', 'no_unfounded_causes', 'sources_and_rights'):
                 dialog.locator('[name=' + field + ']').check()
@@ -203,11 +230,57 @@ def main():
             dialog.evaluate('(node)=>node.scrollTop=0')
             page.screenshot(path=str(ARTIFACTS / 'news-admin-desktop.png'))
             dialog.get_by_role('button', name='최종 승인', exact=True).click()
-            expect(page.locator('dialog:visible')).to_have_count(0)
-            page.get_by_role('button', name='기사 검토·수정').first.click()
+            # 최종 승인 직후 창을 유지해 별도 게시 작업을 놓치지 않게 합니다.
+            expect(page.locator('dialog:visible')).to_contain_text('최종 승인은 저장되었습니다')
+            public_page.locator('#regionalNewsRefresh').click()
+            expect(public_page.locator('#regionalNewsCards').get_by_role('button')).to_have_count(0)
+            page.locator('dialog:visible [data-publish]').scroll_into_view_if_needed()
+            capture_publication(page, '뉴스 게시 2/5 · 최종 승인 저장 후 승인본 게시를 선택')
             page.locator('dialog:visible').get_by_role('button', name='승인본 게시').click()
             expect(page.locator('dialog:visible')).to_have_count(0)
             expect(page.locator('#newsWorkspace')).to_contain_text('게시 중')
+            expect(page.locator('#newsWorkspace')).to_contain_text('게시가 저장되었습니다')
+            page.locator('[aria-label="메인 노출 상태"]').scroll_into_view_if_needed()
+            capture_publication(page, '뉴스 게시 3/5 · DB 저장 상태에서 게시 1건 확인')
+            # 같은 origin의 storage 알림으로 이미 열려 있던 메인이 새 기사를 표시합니다.
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 지역 소식 안내')
+            public_page.locator('#regionalNews').scroll_into_view_if_needed()
+            capture_publication(public_page, '뉴스 게시 4/5 · 열린 메인에 재탐색 없이 자동 반영')
+            # 다른 지역에서 비어 보이는 경우와 전체 지역 조회도 구별합니다.
+            public_page.locator('#countryId').select_option(label='대한민국')
+            public_page.locator('#provinceId').select_option(label='서울특별시')
+            public_page.locator('#districtId').select_option(label='종로구')
+            expect(public_page.locator('#regionalNewsStatus')).to_contain_text('종로구')
+            expect(public_page.locator('#regionalNewsCards').get_by_role('button')).to_have_count(0)
+            public_page.get_by_role('button', name='전체 지역', exact=True).click()
+            expect(public_page.locator('#regionalNewsCards')).to_contain_text('신주쿠 지역 소식 안내')
+            public_page.get_by_role('button', name='소식 읽기 ↗').click()
+            expect(public_page.locator('dialog:visible')).to_contain_text('브라우저 테스트 원자료')
+            capture_publication(public_page, '뉴스 게시 5/5 · 전체 지역 기사와 원자료 출처 확인')
+            public_page.locator('dialog:visible').get_by_role('button', name='닫기', exact=True).click()
+            # 명시적 게시 중단 역시 열린 메인에 반영되며, 승인 절차 없이 공개를 복구하지 않습니다.
+            page.get_by_role('button', name='기사 검토·수정').first.click()
+            page.locator('dialog:visible [name=review_reason]').fill('게시 중단의 메인 자동 반영 테스트')
+            page.locator('dialog:visible [data-unpublish]').click()
+            expect(page.locator('dialog:visible')).to_have_count(0)
+            expect(public_page.locator('#regionalNewsCards').get_by_role('button')).to_have_count(0)
+            # 이후 기존 열람 테스트를 위해 같은 기사에 사람 검토·승인·게시를 다시 수행합니다.
+            page.get_by_role('button', name='기사 검토·수정').first.click()
+            for index in range(2):
+                row = page.locator('dialog:visible [data-claim]').nth(index)
+                row.locator('[data-source-checked]').check()
+                row.locator('[data-claim-note]').fill('중단 후 원자료 다시 대조 완료')
+                row.get_by_role('button', name='근거 일치', exact=True).click()
+                expect(page.locator('dialog:visible [data-claim]').nth(index)).to_contain_text('근거 대조 완료')
+            dialog = page.locator('dialog:visible')
+            for field in ('numbers','time_and_region','no_unfounded_causes','sources_and_rights'):
+                dialog.locator('[name='+field+']').check()
+            dialog.locator('[name=review_reason]').fill('게시 중단 후 최종 재검토 완료')
+            dialog.locator('[data-review=approved]').click()
+            expect(page.locator('dialog:visible [data-publish]')).to_be_enabled()
+            page.locator('dialog:visible [data-publish]').click()
+            expect(page.locator('dialog:visible')).to_have_count(0)
+            public_page.close()
             page.goto(base + '/')
             page.locator('#countryId').select_option(label='일본')
             page.locator('#provinceId').select_option(label='도쿄도')
@@ -242,8 +315,20 @@ def main():
             expect(page.locator('#newsWorkspace')).to_contain_text('VISITOR_COUNT')
             expect(page.locator('#newsWorkspace')).to_contain_text('검증 대기')
             assert not errors, errors
+            if publication_frames:
+                file = ROOT / 'docs/assets/news-publication-demo.gif'
+                publication_frames[0].save(file, save_all=True, append_images=publication_frames[1:], duration=2800, loop=0, optimize=True, disposal=2)
+                manifest_file = ROOT / 'docs/assets/demo-recordings.json'
+                manifest = json.loads(manifest_file.read_text(encoding='utf-8'))
+                entry = {'file': 'docs/assets/news-publication-demo.gif',
+                         'title': '지역 뉴스 게시 — 승인·게시와 열린 메인의 자동 갱신',
+                         'description': '**모의 AI 응답**을 사용하는 격리 MySQL 테스트에서 승인 대기·명시적 게시·열린 메인의 자동 반영·전체 지역 조회·원자료 표시를 확인했습니다. **실제 OpenAI 호출이나 운영 기사 게시가 아닙니다.**',
+                         'alt': '모의 AI 응답의 격리 테스트에서 승인과 게시 후 열린 메인의 기사와 출처를 확인한 실제 화면'}
+                manifest['recordings'] = [r for r in manifest['recordings'] if r['file'] != entry['file']] + [entry]
+                manifest_file.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+                print(f'Publication GIF: {len(publication_frames)} frames, {file.stat().st_size} bytes', flush=True)
             browser.close()
-        print('Browser PASS: connection recovery + empty lists + KR/JP topic selection/race + source/fact/review/publish + Japan/mobile')
+        print('Browser PASS: connection recovery + KR/JP topic selection/race + source/fact/review/publish + pre-opened main auto refresh + region/all + unpublish refresh + Japan/mobile')
     finally:
         for process in processes:
             process.terminate()
