@@ -196,7 +196,10 @@ def test_release_diagnostic_needs_auth_but_not_database_or_ai(newsroom):
         pytest.fail('설치 버전 조회가 DB·AI를 초기화하면 안 됩니다.')
     app.dependency_overrides[get_service] = never_create_service
     try:
-        assert call(client, 'GET', '/public/version') == RELEASE
+        value = call(client, 'GET', '/public/version')
+        assert {key: value[key] for key in RELEASE} == RELEASE
+        assert value['launcher_protocol'] == 'oneclick-v1'
+        assert len(value['project_root_id']) == 64
         assert client.get('/public/version', headers={'x-news-internal-token': 'wrong'}).status_code == 403
     finally:
         app.dependency_overrides[get_service] = original

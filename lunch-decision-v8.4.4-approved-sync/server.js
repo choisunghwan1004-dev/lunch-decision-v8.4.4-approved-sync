@@ -19,7 +19,9 @@ app.use(express.static(path.join(__dirname,'public'),{setHeaders(res,file){
 app.use('/api/news',require('./routes/news-proxy')());
 app.use('/api',api);
 app.get('/admin',(req,res)=>res.set('Cache-Control','no-store').sendFile(path.join(__dirname,'public/admin.html')));
-app.get('/health',async(req,res)=>{try{await require('./db').query('SELECT 1');res.json({ok:true,version:'V8.4.4'})}catch(e){res.status(503).json({ok:false,message:e.message})}});
+// 실행기는 경로 자체가 아닌 지문으로 이 폴더의 최신 서버인지 확인합니다. 기존 health 필드는 유지합니다.
+const runtimeIdentity=require('./lib/runtime-identity').identity(__dirname);
+app.get('/health',async(req,res)=>{try{await require('./db').query('SELECT 1');res.json({ok:true,version:'V8.4.4',...runtimeIdentity})}catch(e){res.status(503).json({ok:false,message:e.message,...runtimeIdentity})}});
 // 권한/입력 오류만 자세히 보여 주고 내부 DB 오류는 화면용 안내로 정리합니다.
 app.use((error,req,res,next)=>{
  console.error('[API]',error.code||'',error.message);

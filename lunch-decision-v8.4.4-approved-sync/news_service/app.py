@@ -79,7 +79,13 @@ RELEASE = json.loads(Path(__file__).with_name('release.json').read_text(encoding
 @app.get('/public/version', dependencies=AUTH)
 def public_version():
     # DB·OpenAI·노션을 호출하지 않는 읽기 전용 설치 진단입니다. 비밀 설정은 반환하지 않습니다.
-    return RELEASE
+    # Node 실행기와 같은 규칙으로 폴더 지문을 만듭니다. 실제 경로·키는 응답에 넣지 않습니다.
+    import hashlib
+    canonical = os.path.realpath(str(Path(__file__).resolve().parents[1]))
+    if os.name == 'nt':
+        canonical = canonical.replace('\\', '/').lower()
+    return {**RELEASE, 'project_root_id': hashlib.sha256(canonical.encode('utf-8')).hexdigest(),
+            'launcher_protocol': 'oneclick-v1'}
 
 
 # 원문 API 오류 대신 안전한 코드와 해결 방법을 관리자에게 전달합니다.

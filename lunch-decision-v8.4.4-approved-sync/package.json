@@ -16,7 +16,7 @@
     "docs:news:check": "node scripts/update-news-readme.js --check",
     "test:docs": "node --test tests/news-readme.test.js",
     "precheck": "npm run docs:news",
-    "check": "node --check server.js && node --check routes/api.js && node --check scripts/migrate.js && node --check scripts/backup.js && node --check routes/news-proxy.js && node --check public/news-admin.js && node --check public/news-public.js",
+    "check": "node --check server.js && node --check routes/api.js && node --check scripts/migrate.js && node --check scripts/backup.js && node --check routes/news-proxy.js && node --check public/news-admin.js && node --check public/news-public.js && node --check scripts/start-all.js && node --check lib/runtime-identity.js",
     "seed:base": "node scripts/seed-demo.js",
     "test:api": "node scripts/test-api.js",
     "doctor": "node scripts/doctor.js",
@@ -29,7 +29,9 @@
     "news:run": "python -m uvicorn news_service.app:app --host 127.0.0.1 --port 8001",
     "news:test": "python -m pytest tests/news -q",
     "test:news-proxy": "node --test tests/news-proxy.test.js",
-    "news:doctor": "node scripts/news-ui-doctor.js"
+    "news:doctor": "node scripts/news-ui-doctor.js",
+    "start:all": "node scripts/start-all.js",
+    "test:launcher": "node --test tests/start-all.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
